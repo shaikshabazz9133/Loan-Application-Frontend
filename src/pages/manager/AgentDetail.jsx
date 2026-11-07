@@ -41,7 +41,14 @@ export default function AgentDetail() {
         actions={
           <>
             <label className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-semibold">
-              <Switch checked={agent.active} onCheckedChange={(v) => { const n = setAgentActive(agent.id, v); toast.success(`${agent.name} ${v ? 'activated' : 'deactivated'}`, n ? { description: `${n} unfinished application${n > 1 ? 's' : ''} returned to open requests.` } : undefined) }} />
+              <Switch checked={agent.active} onCheckedChange={async (v) => {
+                try {
+                  const n = await setAgentActive(agent.id, v)
+                  toast.success(`${agent.name} ${v ? 'activated' : 'deactivated'}`, n ? { description: `${n} unfinished application${n > 1 ? 's' : ''} returned to open requests.` } : undefined)
+                } catch (e) {
+                  toast.error(`Could not ${v ? 'activate' : 'deactivate'} ${agent.name}`, { description: e.message })
+                }
+              }} />
               {agent.active ? 'Active' : 'Inactive'}
             </label>
             <Button variant="outline" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>

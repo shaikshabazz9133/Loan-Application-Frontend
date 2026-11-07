@@ -53,8 +53,13 @@ export default function Agents() {
     ? { lat: agents.reduce((s, a) => s + a.location.lat, 0) / agents.length, lng: agents.reduce((s, a) => s + a.location.lng, 0) / agents.length }
     : { lat: 17.385, lng: 78.4867 }
 
-  const toggle = (a, v) => {
-    const released = setAgentActive(a.id, v)
+  const toggle = async (a, v) => {
+    let released
+    try {
+      released = await setAgentActive(a.id, v)
+    } catch (e) {
+      return toast.error(`Could not ${v ? 'activate' : 'deactivate'} ${a.name}`, { description: e.message })
+    }
     toast.success(`${a.name} ${v ? 'activated' : 'deactivated'}`, released ? { description: `${released} unfinished application${released > 1 ? 's' : ''} returned to open requests for other area agents.` } : undefined)
   }
 
@@ -186,9 +191,9 @@ export default function Agents() {
             <Button variant="outline" onClick={() => setToDelete(null)}>Cancel</Button>
             <Button
               variant="destructive"
-              onClick={() => {
+              onClick={async () => {
                 try {
-                  deleteAgent(toDelete.id)
+                  await deleteAgent(toDelete.id)
                   toast.success('Agent deleted')
                   setToDelete(null)
                 } catch (e) {

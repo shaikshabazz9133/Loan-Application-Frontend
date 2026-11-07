@@ -6,21 +6,22 @@ One React app with three role-based portals: **Customer** (apply & track), **Age
 
 ## Run
 
+Start the backend first (see `loan-management-backend/README.md`): `uvicorn app.main:app --reload` on port 8000.
+
 ```bash
 npm install
-npm run dev
+npm run dev        # http://localhost:5173
 ```
 
-Demo accounts (password `demo123`), also available as one-click buttons on the login page:
+The API address comes from `VITE_API_URL` (default `http://localhost:8000/api/v1`, set in `.env.development`).
 
-| Role | Email |
-|---|---|
-| Customer | customer@demo.com |
-| Agent 1 (Banjara Hills) | agent@demo.com |
-| Agent 2 (Banjara Hills) | agent2@demo.com |
-| Manager | manager@demo.com |
+## Accounts
 
-Use **Reset demo data** in the user menu (top right) to restore the sample data.
+- **Customer:** click *Create an account* on the login page, then sign in with email or mobile.
+- **Manager:** created once on the backend with `python -m scripts.create_manager` (login details come from `MANAGER_EMAIL` / `MANAGER_MOBILE` / `MANAGER_PASSWORD` in the backend `.env`).
+- **Agent:** the manager adds agents under *Agents → Add agent*; the agent then signs in with that email/mobile and password. Deactivated agents can't sign in.
+
+*Clear application data* in the user menu clears the loan applications stored in this browser.
 
 ## Google Maps (optional)
 
@@ -41,21 +42,27 @@ Copy `.env.example` to `.env` and set `VITE_GOOGLE_MAPS_API_KEY` (Maps JavaScrip
 - **Disbursement:** the customer gives a bank account when applying (holder, account number entered twice, IFSC → bank name). The agent verifies it as one of the checks. After the manager approves, they click **Disburse** (IMPS / NEFT / RTGS) and a UTR reference is recorded. The customer sees "Loan approved & amount sent to HDFC Bank •••• 1234" with the UTR, and a 6th timeline step. (Transfers are simulated — connect a payout API such as your bank's or Razorpay/Cashfree payouts in production.)
 - Full application history is recorded for every action.
 
-**Testing credit outcomes:** on the apply form use *Fill test IDs · good credit* or *· low credit*. In the demo data, Vikram Singh (LN-1012, Ravi's queue) and Deepak Malhotra (LN-1018, open in Banjara Hills) have low scores.
+**Testing credit outcomes:** on the apply form use *Fill test IDs · good credit* or *· low credit*.
 
-**Try "first to accept":** log in as `agent@demo.com` in one tab and `agent2@demo.com` in another (both cover Banjara Hills). Tabs stay in sync, so when one accepts, the other sees "Accepted by another agent".
+**Try "first to accept":** create two agents near the same location, sign in as each in separate tabs of the same browser. Tabs stay in sync, so when one accepts, the other sees "Accepted by another agent".
 
 ## Project structure
 
 ```
 src/
-  lib/            store.jsx (data layer + business rules), constants, seed data, utils
+  lib/            api.js (backend calls + session), store.jsx (data layer + business rules), constants, utils
   components/ui/  shadcn-style primitives (button, card, dialog, tabs, table…)
   components/shared/  MapView, StatusTimeline, ActivityLog, VerificationPanel, charts…
   layouts/        AppShell (sidebar + topbar)
   pages/auth|customer|agent|manager
 ```
 
-## Note — frontend only
+## What uses the backend
 
-All data lives in `localStorage` (see `src/lib/store.jsx`). That is fine for a demo but **not secure**: passwords are stored in plain text and every rule is enforced in the browser. When you build the backend, move authentication, the 2 km assignment and the approval rules to the server, and replace the store functions with API calls (the pages only use `useStore()`).
+| Feature | Where the data lives |
+|---|---|
+| Sign up, sign in, session (tokens, auto-refresh) | Backend API (MongoDB) |
+| Agents: add, edit, activate/deactivate, delete | Backend API (MongoDB) |
+| Loan applications, verification, approval, disbursement | Still in this browser's `localStorage` - backend APIs not built yet |
+
+Because applications are still stored per browser, a customer's application is only visible to agents and the manager signed in on the **same browser**, until the application APIs are added.

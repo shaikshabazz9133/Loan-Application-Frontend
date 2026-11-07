@@ -1,30 +1,23 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { ASSIGNMENT_RADIUS_KM, STATUS } from './constants'
-import { seedApplications, seedUsers } from './seed'
+import { agentsApi, authApi, clearSession, getSession, saveSession, setSessionEndedHandler } from './api'
 import { distanceKm, uid } from './utils'
 import { MIN_CREDIT_SCORE, creditScoreFor, isAcceptableAadhaar, isValidPan } from './kyc'
 import { bankLabel, isValidAccount, isValidIfsc, makeUtr } from './bank'
 import { creditOk, recommendBlocker, verificationProgress } from './verification'
 
 /**
- * Frontend-only data layer. Everything is persisted to localStorage so the demo
- * behaves like a real app across reloads. Replace these functions with API calls
- * when the backend is ready — the components only use the hook below.
+ * App data layer - components only use the useStore() hook below.
+ *
+ * From the backend API (src/lib/api.js):  sign up, sign in, session, and manager agent management.
+ * Still in localStorage (no backend APIs yet): loan applications. `users` here is a local cache of
+ * accounts the app has seen (signed-in user + agents loaded from the API) so applications can show names.
  */
 
-const DB_KEY = 'lendwise.db.v4'
-const SESSION_KEY = 'lendwise.session'
+const DB_KEY = 'lendwise.db.v5'
 
-const withDistances = (apps, users) =>
-  apps.map((a) => {
-    const agent = users.find((u) => u.id === a.agentId)
-    return { ...a, agentDistanceKm: agent ? +distanceKm(a.location, agent.location).toFixed(2) : null }
-  })
-
-function freshDb() {
-  const users = seedUsers()
-  return { users, applications: withDistances(seedApplications(users), users), seq: 1020 }
-}
+const freshDb = () => ({ users: [], applications: [], seq: 1020 })
 
 function loadDb() {
   try {
@@ -34,14 +27,6 @@ function loadDb() {
     /* ignore corrupt / blocked storage */
   }
   return freshDb()
-}
-
-function loadSession() {
-  try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY) || 'null')
-  } catch {
-    return null
-  }
 }
 
 const now = () => new Date().toISOString()
@@ -67,7 +52,7 @@ const StoreContext = createContext(null)
 
 export function StoreProvider({ children }) {
   const [db, setDb] = useState(loadDb)
-  const [session, setSession] = useState(loadSession)
+  const [session, setSession] = useState(getSession)
 
   useEffect(() => {
     try {
@@ -91,7 +76,63 @@ export function StoreProvider({ children }) {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  const currentUser = useMemo(() => db.users.find((u) => u.id === session?.userId) || null, [db.users, session])
+  const currentUser = session?.user || null
+
+  /** Add or update users in the local cache (by id). */
+  const upsertUsers = useCallback((list) => {
+    setDb((d) => {
+      const byId = new Map(d.users.map((u) => [u.id, u]))
+      list.forEach((u) => byId.set(u.id, { ...byId.get(u.id), ...u }))
+      return { ...d, users: [...byId.values()] }
+    })
+  }, [])
+
+  const startSession = useCallback((res, remember) => {
+    const next = { accessToken: res.accessToken, refreshToken: res.refreshToken, user: res.user, remember }
+    saveSession(next)
+    setSession(next)
+    return res.user
+  }, [])
+
+  // The API signs us out when a session can't be refreshed or the account was deactivated.
+  useEffect(() => {
+    setSessionEndedHandler((err) => {
+      setSession(null)
+      toast.error(err.message)
+    })
+  }, [])
+
+  // On page load, confirm the saved session with the server and get the latest profile.
+  useEffect(() => {
+    if (!getSession()) return
+    authApi
+      .me()
+      .then((user) => {
+        const current = getSession()
+        if (!current) return
+        const next = { ...current, user }
+        saveSession(next)
+        setSession(next)
+      })
+      .catch(() => {
+        /* invalid session is handled by the API layer; network errors keep the saved session */
+      })
+  }, [])
+
+  // Keep the signed-in user in the local cache so applications can show their name.
+  useEffect(() => {
+    if (currentUser) upsertUsers([currentUser])
+  }, [currentUser, upsertUsers])
+
+  // Managers: load the real agent list (replaces any cached agents).
+  const loadAgents = useCallback(async () => {
+    const agents = await agentsApi.list()
+    setDb((d) => ({ ...d, users: [...d.users.filter((u) => u.role !== 'agent'), ...agents] }))
+  }, [])
+
+  useEffect(() => {
+    if (currentUser?.role === 'manager') loadAgents().catch((err) => toast.error(err.message))
+  }, [currentUser?.id, currentUser?.role, loadAgents])
 
   // ---------- helpers ----------
   const patchApp = useCallback((id, fn) => {
@@ -108,47 +149,22 @@ export function StoreProvider({ children }) {
   })
 
   // ---------- auth ----------
+  /** Sign in with email or mobile. Throws ApiError (e.g. wrong password, deactivated agent). */
   const login = useCallback(
-    (identifier, password, remember) => {
-      const id = identifier.trim().toLowerCase()
-      const user = db.users.find((u) => u.email.toLowerCase() === id || u.mobile === id)
-      if (!user || user.password !== password) throw new Error('Invalid email/mobile or password.')
-      if (user.role === 'agent' && !user.active) throw new Error('Your agent account is deactivated. Please contact your manager.')
-      const s = { userId: user.id }
-      try {
-        localStorage.removeItem(SESSION_KEY)
-        sessionStorage.removeItem(SESSION_KEY)
-        ;(remember ? localStorage : sessionStorage).setItem(SESSION_KEY, JSON.stringify(s))
-      } catch {
-        /* ignore */
-      }
-      setSession(s)
-      return user
-    },
-    [db.users]
+    async (identifier, password, remember) => startSession(await authApi.login({ identifier: identifier.trim(), password, remember }), remember),
+    [startSession]
   )
 
   const logout = useCallback(() => {
-    try {
-      localStorage.removeItem(SESSION_KEY)
-      sessionStorage.removeItem(SESSION_KEY)
-    } catch {
-      /* ignore */
-    }
+    clearSession()
     setSession(null)
   }, [])
 
-  const emailOrMobileTaken = (users, email, mobile, exceptId) =>
-    users.some((u) => u.id !== exceptId && (u.email.toLowerCase() === email.toLowerCase() || u.mobile === mobile))
-
+  /** Customer sign-up; the API signs the new customer in straight away. */
   const signup = useCallback(
-    ({ name, email, mobile, password }) => {
-      if (emailOrMobileTaken(db.users, email, mobile)) throw new Error('An account with this email or mobile number already exists.')
-      const user = { id: uid('u'), role: 'customer', name: name.trim(), email: email.trim(), mobile, password, createdAt: now() }
-      setDb((d) => ({ ...d, users: [...d.users, user] }))
-      return user
-    },
-    [db.users]
+    async ({ name, email, mobile, password, terms }) =>
+      startSession(await authApi.register({ name: name.trim(), email: email.trim(), mobile, password, termsAccepted: terms }), true),
+    [startSession]
   )
 
   // ---------- customer ----------
@@ -394,28 +410,20 @@ export function StoreProvider({ children }) {
     [currentUser]
   )
 
+  /** Create (no id) or edit (with id) an agent through the API. Throws ApiError with field details. */
   const saveAgent = useCallback(
-    (data) => {
-      if (emailOrMobileTaken(db.users, data.email, data.mobile, data.id)) throw new Error('Another user already uses this email or mobile number.')
-      if (data.id) {
-        setDb((d) => ({
-          ...d,
-          users: d.users.map((u) => (u.id === data.id ? { ...u, ...data, password: data.password || u.password } : u)),
-        }))
-      } else {
-        const code = `AG-${1000 + db.users.filter((u) => u.role === 'agent').length + 1}`
-        setDb((d) => ({
-          ...d,
-          users: [...d.users, { ...data, id: uid('u'), role: 'agent', active: data.active ?? true, employeeCode: code, password: data.password || 'demo123', createdAt: now() }],
-        }))
-      }
+    async ({ id, ...data }) => {
+      const saved = id ? await agentsApi.update(id, data) : await agentsApi.create(data)
+      upsertUsers([saved])
+      return saved
     },
-    [db.users]
+    [upsertUsers]
   )
 
-  /** Deactivating an agent returns their unfinished cases to the open pool so area agents can accept them. */
+  /** Deactivating an agent (API) also returns their unfinished cases to the open pool so area agents can accept them. */
   const setAgentActive = useCallback(
-    (agentId, active) => {
+    async (agentId, active) => {
+      await agentsApi.update(agentId, { active })
       const agent = db.users.find((u) => u.id === agentId)
       const releasable = (a) => a.agentId === agentId && [STATUS.ASSIGNED, STATUS.IN_VERIFICATION].includes(a.status)
       const released = active ? 0 : db.applications.filter(releasable).length
@@ -445,15 +453,20 @@ export function StoreProvider({ children }) {
   )
 
   const deleteAgent = useCallback(
-    (agentId) => {
+    async (agentId) => {
       if (db.applications.some((a) => a.agentId === agentId))
         throw new Error('This agent has applications assigned. Deactivate the agent instead, or reassign the applications first.')
+      await agentsApi.remove(agentId)
       setDb((d) => ({ ...d, users: d.users.filter((u) => u.id !== agentId) }))
     },
     [db.applications]
   )
 
-  const resetDemo = useCallback(() => setDb(freshDb()), [])
+  /** Clears local application data (accounts live in the backend and are kept). */
+  const resetDemo = useCallback(() => {
+    setDb({ ...freshDb(), users: currentUser ? [currentUser] : [] })
+    if (currentUser?.role === 'manager') loadAgents().catch(() => {})
+  }, [currentUser, loadAgents])
 
   const value = {
     users: db.users,
@@ -478,6 +491,7 @@ export function StoreProvider({ children }) {
     saveAgent,
     setAgentActive,
     deleteAgent,
+    loadAgents,
     resetDemo,
   }
 

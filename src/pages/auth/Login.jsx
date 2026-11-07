@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowRight, Briefcase, Eye, EyeOff, Lock, Mail, ShieldCheck, User } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/lib/store'
 import { ROLE_HOME } from '@/lib/constants'
@@ -10,13 +10,6 @@ import { Field, Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import AuthLayout from './AuthLayout'
-
-const DEMO = [
-  { role: 'Customer', email: 'customer@demo.com', icon: User },
-  { role: 'Agent 1', email: 'agent@demo.com', icon: Briefcase },
-  { role: 'Agent 2', email: 'agent2@demo.com', icon: Briefcase },
-  { role: 'Manager', email: 'manager@demo.com', icon: ShieldCheck },
-]
 
 export default function Login() {
   const { login } = useStore()
@@ -28,22 +21,20 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [forgotOpen, setForgotOpen] = useState(false)
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault()
     setError('')
     if (!form.identifier.trim() || !form.password) return setError('Please enter your email/mobile and password.')
     setLoading(true)
-    setTimeout(() => {
-      try {
-        const user = login(form.identifier, form.password, form.remember)
-        toast.success(`Welcome back, ${user.name.split(' ')[0]}!`)
-        const from = location.state?.from
-        navigate(from && from.startsWith(ROLE_HOME[user.role]) ? from : ROLE_HOME[user.role], { replace: true })
-      } catch (err) {
-        setError(err.message)
-        setLoading(false)
-      }
-    }, 450)
+    try {
+      const user = await login(form.identifier, form.password, form.remember)
+      toast.success(`Welcome back, ${user.name.split(' ')[0]}!`)
+      const from = location.state?.from
+      navigate(from && from.startsWith(ROLE_HOME[user.role]) ? from : ROLE_HOME[user.role], { replace: true })
+    } catch (err) {
+      setError(err.message)
+      setLoading(false)
+    }
   }
 
   return (
@@ -110,22 +101,6 @@ export default function Login() {
           Create an account
         </Link>
       </p>
-
-      <div className="mt-8 rounded-xl border border-dashed bg-card p-4">
-        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Demo accounts · password demo123</p>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {DEMO.map((d) => (
-            <button
-              key={d.role}
-              type="button"
-              onClick={() => setForm({ ...form, identifier: d.email, password: 'demo123' })}
-              className="flex flex-col items-center gap-1.5 rounded-lg border bg-background px-2 py-2.5 text-xs font-semibold transition hover:border-primary hover:bg-accent hover:text-accent-foreground"
-            >
-              <d.icon className="size-4" /> {d.role}
-            </button>
-          ))}
-        </div>
-      </div>
 
       <ForgotPasswordDialog open={forgotOpen} onOpenChange={setForgotOpen} />
     </AuthLayout>

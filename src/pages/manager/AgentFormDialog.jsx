@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, LocateFixed } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/lib/store'
+import { fieldErrors } from '@/lib/api'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Field, Label } from '@/components/ui/label'
@@ -24,6 +25,7 @@ export function AgentFormDialog({ open, onOpenChange, agent }) {
   const [f, setF] = useState(EMPTY)
   const [errors, setErrors] = useState({})
   const [locating, setLocating] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -45,7 +47,7 @@ export function AgentFormDialog({ open, onOpenChange, agent }) {
     )
   }
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault()
     const er = {}
     if (f.name.trim().length < 3) er.name = 'Enter the agent’s full name.'
@@ -57,8 +59,9 @@ export function AgentFormDialog({ open, onOpenChange, agent }) {
     if (!loc || Math.abs(loc.lat) > 90 || Math.abs(loc.lng) > 180) er.location = 'Set a valid location — click the map, use GPS or enter coordinates.'
     setErrors(er)
     if (Object.keys(er).length) return
+    setSaving(true)
     try {
-      saveAgent({
+      await saveAgent({
         id: agent?.id,
         name: f.name.trim(),
         email: f.email.trim(),
@@ -72,7 +75,10 @@ export function AgentFormDialog({ open, onOpenChange, agent }) {
       toast.success(agent ? 'Agent updated' : 'Agent added', { description: `${f.name} · ${f.area}` })
       onOpenChange(false)
     } catch (err) {
-      setErrors({ form: err.message })
+      const fields = fieldErrors(err)
+      setErrors(Object.keys(fields).length ? fields : { form: err.message })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -144,7 +150,7 @@ export function AgentFormDialog({ open, onOpenChange, agent }) {
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit">{agent ? 'Save changes' : 'Add agent'}</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Saving…' : agent ? 'Save changes' : 'Add agent'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

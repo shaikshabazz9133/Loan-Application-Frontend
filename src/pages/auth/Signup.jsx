@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/lib/store'
+import { fieldErrors } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -23,11 +24,12 @@ const STRENGTH = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong']
 const STRENGTH_COLOR = ['bg-red-500', 'bg-red-500', 'bg-amber-500', 'bg-teal-500', 'bg-emerald-500']
 
 export default function Signup() {
-  const { signup, login } = useStore()
+  const { signup } = useStore()
   const navigate = useNavigate()
   const [f, setF] = useState({ name: '', email: '', mobile: '', password: '', confirm: '', terms: false })
   const [errors, setErrors] = useState({})
   const [showPw, setShowPw] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value })
 
@@ -42,18 +44,20 @@ export default function Signup() {
     return e
   }
 
-  const submit = (ev) => {
+  const submit = async (ev) => {
     ev.preventDefault()
     const e = validate()
     setErrors(e)
     if (Object.keys(e).length) return
+    setLoading(true)
     try {
-      signup(f)
-      login(f.email, f.password, true)
+      await signup(f) // creates the customer and signs them in
       toast.success('Account created! Welcome to LendWise.')
       navigate('/customer', { replace: true })
     } catch (err) {
-      setErrors({ form: err.message })
+      const fields = fieldErrors(err)
+      setErrors(Object.keys(fields).length ? fields : { form: err.message })
+      setLoading(false)
     }
   }
 
@@ -126,8 +130,8 @@ export default function Signup() {
 
         {errors.form && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">{errors.form}</p>}
 
-        <Button type="submit" size="lg" className="w-full">
-          Create account <ArrowRight />
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? 'Creating account…' : <>Create account <ArrowRight /></>}
         </Button>
       </form>
 

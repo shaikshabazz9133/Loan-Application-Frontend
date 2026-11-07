@@ -136,11 +136,11 @@ export default function AppShell() {
               <DropdownMenuItem
                 onSelect={() => {
                   resetDemo()
-                  toast.success('Demo data has been reset')
+                  toast.success('Local application data cleared')
                   if (pathname.split('/').length > 3) navigate(`/${me.role}`)
                 }}
               >
-                <RotateCcw /> Reset demo data
+                <RotateCcw /> Clear application data
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive [&_svg]:text-destructive"
