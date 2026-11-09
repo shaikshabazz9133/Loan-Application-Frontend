@@ -4,9 +4,30 @@ One React app with three role-based portals: **Customer** (apply & track), **Age
 
 **Stack:** React 18 + Vite · Tailwind CSS · shadcn/ui components (Radix) · Lucide icons · Recharts · Google Maps (`@vis.gl/react-google-maps`)
 
-## Run
+## Run with Docker (recommended - no Node.js install needed)
 
-Start the backend first (see `loan-management-backend/README.md`): `uvicorn app.main:app --reload` on port 8000.
+Start the backend first: in `loan-management-backend`, run `docker compose up -d` (see its README). Then here:
+
+```bash
+docker compose up -d      # first run installs packages (about 2 minutes) -> http://localhost:5173
+```
+
+- Your code is shared live with the container: save a file and the browser updates.
+- The app calls the API at `http://localhost:8000/api/v1`. To use the shared office backend instead:
+  `VITE_API_URL=http://192.168.1.4:8000/api/v1 docker compose up -d`
+- Port 5173 busy (e.g. `npm run dev` already running)? `WEB_PORT=5174 docker compose up -d`, and add
+  `http://localhost:5174` to `CORS_ORIGINS` in the backend `.env`.
+
+| Command | What it does |
+|---|---|
+| `docker compose up -d` | Start the frontend |
+| `docker compose logs -f web` | Follow the Vite logs and errors |
+| `docker compose up -d --build` | Rebuild after `package.json` changes (a new package) |
+| `docker compose down` | Stop |
+
+Add a package with `docker compose exec web npm install <package>`, so `package.json` and `package-lock.json` are updated, then rebuild.
+
+## Run without Docker
 
 ```bash
 npm install
@@ -14,18 +35,13 @@ npm run dev        # http://localhost:5173
 ```
 
 The API address comes from `VITE_API_URL` (default `http://localhost:8000/api/v1`, set in `.env.development`).
+To point only your own laptop somewhere else, put `VITE_API_URL=...` in `.env.development.local` (ignored by Git).
 
 ## Accounts
 
-- **Customer:** click *Create an account* on the login page, then sign in with email or mobile.
-- **Manager:** created once on the backend with `python -m scripts.create_manager` (login details come from `MANAGER_EMAIL` / `MANAGER_MOBILE` / `MANAGER_PASSWORD` in the backend `.env`).
-- **Agent:** the manager adds agents under *Agents → Add agent*; the agent then signs in with that email/mobile and password. Deactivated agents can't sign in.
-
-*Clear application data* in the user menu clears the loan applications stored in this browser.
-
-## Google Maps (optional)
-
-Copy `.env.example` to `.env` and set `VITE_GOOGLE_MAPS_API_KEY` (Maps JavaScript API enabled). Without a key, a built-in preview map is shown; it still supports click-to-pick locations and the 2 km radius.
+- **Customer:** no account. Open `/`, click *Apply for loan*, and see the status afterwards (or track it at `/track` with the application ID + mobile).
+- **Manager:** created automatically by the backend from `MANAGER_EMAIL` / `MANAGER_MOBILE` / `MANAGER_PASSWORD` in the backend `.env` (fresh Docker setup: `manager@example.com` / `manager123`). Signs in at `/login`.
+- **Agent:** the manager adds agents under *Agents → Add agent*; the agent then signs in at `/login` with that email/mobile and password. Deactivated agents can't sign in.
 
 ## Business rules implemented
 

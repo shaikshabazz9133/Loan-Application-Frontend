@@ -1,0 +1,24 @@
+# LendWise frontend, with one command:
+#
+#   docker compose up -d      (start)   -> http://localhost:5173
+#   docker compose down       (stop)
+#
+# Start the backend first (in loan-management-backend: docker compose up -d).
+name: lendwise-web
+
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    environment:
+      # The browser on your laptop calls the API, so this is "localhost", not a container name.
+      # Shared office backend instead:  VITE_API_URL=http://192.168.1.4:8000/api/v1 docker compose up -d
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
+      VITE_AADHAAR_DEMO_MODE: "true"
+    volumes:
+      # Your code is shared live with the container: save a file and the browser updates.
+      - .:/app
+      # ...except node_modules, which stays inside the container (Linux packages, not your Mac's).
+      - /app/node_modules
