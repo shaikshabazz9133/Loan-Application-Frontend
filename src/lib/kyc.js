@@ -53,23 +53,29 @@ export const MIN_AGE = 21
 export const MAX_AGE = 60
 
 // ---------- Loan terms ----------
-export const TENURES = [6, 12, 18, 24, 36, 48, 60, 72, 84]
-export const INTEREST_RATE = 12 // % p.a., indicative
 export const MAX_FOIR = 0.5 // EMI should be at most 50% of monthly income
 
-export function emiFor(amount, months, ratePa = INTEREST_RATE) {
+/** Reducing-balance EMI: P x r x (1+r)^n / ((1+r)^n - 1), r = monthly rate. */
+export function emiFor(amount, months, ratePa) {
   const P = Number(amount) || 0
   const n = Number(months) || 0
-  if (!P || !n) return 0
+  if (!P || !n || ratePa == null) return 0
   const r = ratePa / 12 / 100
+  if (!r) return Math.round(P / n)
   return Math.round((P * r * (1 + r) ** n) / ((1 + r) ** n - 1))
 }
+
+/** EMI saved on an application (calculated by the server with that application's rate). */
+export const emiOf = (app) => app?.emi ?? emiFor(app?.amount, app?.tenure, app?.interestRatePa)
 export const tenureLabel = (m) => (m ? (m % 12 === 0 ? `${m} months (${m / 12} yr${m > 12 ? 's' : ''})` : `${m} months`) : '—')
 
 // ---------- Simulated credit bureau (CIBIL-style 300–900) ----------
 export const MIN_CREDIT_SCORE = 650
 
-/** Deterministic per PAN, so the same customer always gets the same score. ~25% of PANs score below 650. */
+/**
+ * Deterministic per PAN, so the same customer always gets the same score. ~25% of PANs score below 650.
+ * Same algorithm as the backend (app/eligibility/emi.py); applications carry the server's score as app.creditScore.
+ */
 export function creditScoreFor(pan) {
   let h = 2166136261
   for (const ch of pan) {

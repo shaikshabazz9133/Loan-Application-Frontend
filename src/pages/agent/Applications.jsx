@@ -4,7 +4,7 @@ import { ExternalLink, FileText, Inbox } from 'lucide-react'
 import { useStore, openRequestsFor } from '@/lib/store'
 import { STATUS } from '@/lib/constants'
 import { cn, formatDate, formatINR } from '@/lib/utils'
-import { emiFor } from '@/lib/kyc'
+import { emiOf } from '@/lib/kyc'
 import { Card } from '@/components/ui/card'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -48,7 +48,7 @@ export default function AgentApplications() {
     ) },
     { key: 'contact', header: 'Mobile / Email', cell: (a) => <div><p>{a.mobile}</p><p className="text-xs text-muted-foreground">{a.email}</p></div> },
     { key: 'amount', header: 'Loan amount', cell: (a) => <span className="font-bold tabular">{formatINR(a.amount)}</span> },
-    { key: 'tenure', header: 'Tenure', cell: (a) => <div><p className="font-semibold">{a.tenure} mo</p><p className="text-xs text-muted-foreground">EMI {formatINR(emiFor(a.amount, a.tenure))}</p></div> },
+    { key: 'tenure', header: 'Tenure', cell: (a) => <div><p className="font-semibold">{a.tenure} mo</p><p className="text-xs text-muted-foreground">EMI {formatINR(emiOf(a))}</p></div> },
     { key: 'purpose', header: 'Purpose', cell: (a) => a.purpose },
     { key: 'income', header: 'Monthly income', cell: (a) => <span className="tabular">{formatINR(a.income)}</span> },
     { key: 'address', header: 'Address', className: 'max-w-[200px] truncate', cell: (a) => <span title={`${a.address}, ${a.city}`}>{a.address}, {a.city}</span> },

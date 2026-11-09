@@ -1,23 +1,57 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ASSIGNMENT_RADIUS_KM, STATUS } from './constants'
-import { agentsApi, authApi, clearSession, getSession, saveSession, setSessionEndedHandler } from './api'
+import { agentsApi, applicationsApi, authApi, clearSession, customersApi, getSession, saveSession, setSessionEndedHandler } from './api'
 import { distanceKm, uid } from './utils'
-import { MIN_CREDIT_SCORE, creditScoreFor, isAcceptableAadhaar, isValidPan } from './kyc'
-import { bankLabel, isValidAccount, isValidIfsc, makeUtr } from './bank'
+import { MIN_CREDIT_SCORE, creditScoreFor } from './kyc'
+import { bankLabel, makeUtr } from './bank'
 import { creditOk, recommendBlocker, verificationProgress } from './verification'
 
 /**
  * App data layer - components only use the useStore() hook below.
  *
- * From the backend API (src/lib/api.js):  sign up, sign in, session, and manager agent management.
- * Still in localStorage (no backend APIs yet): loan applications. `users` here is a local cache of
- * accounts the app has seen (signed-in user + agents loaded from the API) so applications can show names.
+ * From the backend API (src/lib/api.js): sign up, sign in, session, agents, customers, and loan applications
+ * (submit + list + documents). `users` is a local cache of accounts loaded from the API so pages can show names.
+ *
+ * Still local (no backend APIs yet): the agent/manager workflow after submission - accept, decline, verify,
+ * recommend, approve, reject, disburse. Those changes are kept in localStorage and layered over the server
+ * copy of each application (see WORKFLOW_FIELDS), so they survive a reload in this browser.
  */
 
-const DB_KEY = 'lendwise.db.v5'
+const DB_KEY = 'lendwise.db.v6'
 
-const freshDb = () => ({ users: [], applications: [], seq: 1020 })
+/** Fields changed by the local workflow. Everything else (what the customer submitted) comes from the server. */
+const WORKFLOW_FIELDS = ['status', 'agentId', 'agentDistanceKm', 'declinedBy', 'creditCheck', 'verification', 'agentDecision', 'managerDecision', 'disbursement', 'history', 'updatedAt']
+
+/** Server applications don't carry workflow state yet - give them the empty defaults the pages expect. */
+const withWorkflowDefaults = (app) => ({
+  agentId: null,
+  agentDistanceKm: null,
+  declinedBy: [],
+  creditCheck: null,
+  verification: { checks: {}, comments: [] },
+  agentDecision: null,
+  managerDecision: null,
+  disbursement: null,
+  history: [],
+  ...app,
+})
+
+/** Server copy + this browser's workflow progress for the same application. */
+function mergeApplications(local, server) {
+  const byId = new Map(local.map((a) => [a.id, a]))
+  const merged = server.map((s) => {
+    const mine = byId.get(s.id)
+    const base = withWorkflowDefaults(s)
+    if (!mine) return base
+    return { ...base, ...Object.fromEntries(WORKFLOW_FIELDS.filter((k) => mine[k] !== undefined).map((k) => [k, mine[k]])) }
+  })
+  const serverIds = new Set(server.map((a) => a.id))
+  // Keep applications this browser knows but the current user can't list (e.g. another role's view in another tab).
+  return [...merged, ...local.filter((a) => !serverIds.has(a.id))].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+const freshDb = () => ({ users: [], applications: [] })
 
 function loadDb() {
   try {
@@ -130,9 +164,32 @@ export function StoreProvider({ children }) {
     setDb((d) => ({ ...d, users: [...d.users.filter((u) => u.role !== 'agent'), ...agents] }))
   }, [])
 
+  // Managers: every registered customer (they appear as soon as they sign up).
+  const loadCustomers = useCallback(async () => {
+    const customers = await customersApi.list()
+    setDb((d) => ({ ...d, users: [...d.users.filter((u) => u.role !== 'customer' || u.id === currentUser?.id), ...customers] }))
+  }, [currentUser?.id])
+
+  // Everyone: applications this user may see (own / open in agent's area / all for managers).
+  const loadApplications = useCallback(async () => {
+    const list = await applicationsApi.list()
+    setDb((d) => ({ ...d, applications: mergeApplications(d.applications, list) }))
+  }, [])
+
+  const refresh = useCallback(() => {
+    if (!getSession()) return Promise.resolve()
+    const role = getSession().user?.role
+    return Promise.all([loadApplications(), ...(role === 'manager' ? [loadAgents(), loadCustomers()] : [])])
+  }, [loadApplications, loadAgents, loadCustomers])
+
   useEffect(() => {
-    if (currentUser?.role === 'manager') loadAgents().catch((err) => toast.error(err.message))
-  }, [currentUser?.id, currentUser?.role, loadAgents])
+    if (!currentUser) return
+    refresh().catch((err) => toast.error(err.message))
+    // Pick up new sign-ups and submissions when the user comes back to the tab.
+    const onVisible = () => document.visibilityState === 'visible' && refresh().catch(() => {})
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [currentUser?.id, currentUser?.role, refresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- helpers ----------
   const patchApp = useCallback((id, fn) => {
@@ -168,49 +225,13 @@ export function StoreProvider({ children }) {
   )
 
   // ---------- customer ----------
-  const submitApplication = useCallback(
-    (form) => {
-      // No auto-assignment: the request goes to the manager and is offered to every active agent in the area.
-      if (!isAcceptableAadhaar(form.aadhaar)) throw new Error('Invalid Aadhaar number.')
-      if (!isValidPan(form.pan)) throw new Error('Invalid PAN number.')
-      if (!form.bank || !isValidAccount(form.bank.account) || !isValidIfsc(form.bank.ifsc)) throw new Error('Invalid bank account details.')
-      const areaAgents = db.users.filter((u) => u.role === 'agent' && u.active && inAgentArea(form, u))
-      const id = `LN-${db.seq}`
-      const app = {
-        id,
-        customerId: currentUser.id,
-        agentId: null,
-        agentDistanceKm: null,
-        declinedBy: [],
-        ...form,
-        amount: Number(form.amount),
-        income: Number(form.income),
-        tenure: Number(form.tenure),
-        creditCheck: null,
-        disbursement: null,
-        status: STATUS.UNASSIGNED,
-        verification: { checks: {}, comments: [] },
-        agentDecision: null,
-        managerDecision: null,
-        history: [
-          historyEntry(currentUser, 'Application submitted', `Loan request for ₹${Number(form.amount).toLocaleString('en-IN')}`),
-          historyEntry(
-            null,
-            'Sent to manager & area agents',
-            areaAgents.length
-              ? `Visible to the manager and ${areaAgents.length} agent${areaAgents.length > 1 ? 's' : ''} within ${ASSIGNMENT_RADIUS_KM} km`
-              : `Visible to the manager. No active agent covers this location yet`
-          ),
-        ],
-        createdAt: now(),
-        updatedAt: now(),
-      }
-      setDb((d) => ({ ...d, seq: d.seq + 1, applications: [app, ...d.applications] }))
-      return { app, areaAgents: areaAgents.length }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [db.users, db.seq, currentUser]
-  )
+  /** Sends the form + documents to the API (formData built by the apply form). Throws ApiError with per-field details. */
+  const submitApplication = useCallback(async (formData) => {
+    const { application, areaAgents } = await applicationsApi.submit(formData)
+    const app = withWorkflowDefaults(application)
+    setDb((d) => ({ ...d, applications: [app, ...d.applications.filter((a) => a.id !== app.id)] }))
+    return { app, areaAgents }
+  }, [])
 
   // ---------- agent ----------
   /** First agent to accept wins. Re-reads storage so another tab's claim is respected. */
@@ -270,7 +291,7 @@ export function StoreProvider({ children }) {
       const app = db.applications.find((a) => a.id === appId)
       if (!app || app.agentId !== currentUser.id) throw new Error('Only the assigned agent can run the credit check.')
       if (app.creditCheck) return app.creditCheck.score
-      const score = creditScoreFor(app.pan)
+      const score = app.creditScore ?? creditScoreFor(app.pan) // score pulled when the customer applied
       patchApp(appId, (a) => ({
         ...a,
         status: a.status === STATUS.ASSIGNED ? STATUS.IN_VERIFICATION : a.status,
@@ -462,11 +483,11 @@ export function StoreProvider({ children }) {
     [db.applications]
   )
 
-  /** Clears local application data (accounts live in the backend and are kept). */
+  /** Clears this browser's local workflow progress and reloads everything from the server. */
   const resetDemo = useCallback(() => {
     setDb({ ...freshDb(), users: currentUser ? [currentUser] : [] })
-    if (currentUser?.role === 'manager') loadAgents().catch(() => {})
-  }, [currentUser, loadAgents])
+    refresh().catch(() => {})
+  }, [currentUser, refresh])
 
   const value = {
     users: db.users,
@@ -492,6 +513,7 @@ export function StoreProvider({ children }) {
     setAgentActive,
     deleteAgent,
     loadAgents,
+    refresh,
     resetDemo,
   }
 

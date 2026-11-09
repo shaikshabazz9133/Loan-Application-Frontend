@@ -4,7 +4,7 @@ import { ChevronRight, FileText, Plus } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { isApproved, isPending, isRejected } from '@/lib/constants'
 import { formatDate, formatINR } from '@/lib/utils'
-import { emiFor } from '@/lib/kyc'
+import { emiOf } from '@/lib/kyc'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -48,7 +48,7 @@ export default function MyApplications() {
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-muted-foreground">{a.id} · {formatDate(a.createdAt)}</p>
                     <p className="mt-1 text-xl font-extrabold tabular">{formatINR(a.amount)}</p>
-                    <p className="text-sm text-muted-foreground">{a.purpose} · {a.tenure} months · EMI {formatINR(emiFor(a.amount, a.tenure))}</p>
+                    <p className="text-sm text-muted-foreground">{a.purpose} · {a.tenure} months · EMI {formatINR(emiOf(a))}</p>
                   </div>
                   <StatusBadge status={a.status} audience="customer" />
                 </div>

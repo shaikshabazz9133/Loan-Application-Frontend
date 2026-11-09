@@ -1,37 +1,9 @@
-/**
- * Document storage in IndexedDB (localStorage is too small for files).
- * Frontend-only stand-in for real object storage (e.g. S3) — replace with uploads to your API.
- */
-const DB_NAME = 'lendwise-docs'
-const STORE = 'files'
-export const MAX_DOC_BYTES = 5 * 1024 * 1024
-export const DOC_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf'
+/** Document helpers. Files are uploaded with the application (POST /applications) and stored by the backend. */
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1)
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE)
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-async function tx(mode, fn) {
-  const db = await openDb()
-  return new Promise((resolve, reject) => {
-    const t = db.transaction(STORE, mode)
-    const req = fn(t.objectStore(STORE))
-    t.oncomplete = () => resolve(req?.result)
-    t.onerror = () => reject(t.error)
-  })
-}
-
-export const putDoc = (key, blob) => tx('readwrite', (s) => s.put(blob, key))
-export const getDoc = (key) => tx('readonly', (s) => s.get(key))
-
-export function validateDocFile(file) {
-  if (!DOC_ACCEPT.split(',').includes(file.type)) return 'Upload a JPG, PNG, WEBP or PDF file.'
-  if (file.size > MAX_DOC_BYTES) return 'File is larger than 5 MB.'
+/** rules = options.documents from GET /applications/options ({ maxSizeMb, allowedMimeTypes }). */
+export function validateDocFile(file, rules) {
+  if (!rules.allowedMimeTypes.includes(file.type)) return 'Upload a JPG, PNG, WEBP or PDF file.'
+  if (file.size > rules.maxSizeMb * 1024 * 1024) return `File is larger than ${rules.maxSizeMb} MB.`
   return null
 }
 

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertCircle, CheckCircle2, Clock, EyeOff, FileText, Hand, Info, IndianRupee, Lock, MapPin, Navigation, PlayCircle, ThumbsUp, UserX, X, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore, openRequestsFor, inAgentArea } from '@/lib/store'
-import { INTEREST_RATE, MIN_CREDIT_SCORE, creditBand, emiFor } from '@/lib/kyc'
+import { MIN_CREDIT_SCORE, creditBand, emiOf } from '@/lib/kyc'
 import { creditOk, recommendBlocker, verificationProgress } from '@/lib/verification'
 import { STATUS } from '@/lib/constants'
 import { distanceKm, formatDateTime, formatINR } from '@/lib/utils'
@@ -37,7 +37,7 @@ export default function AgentApplicationDetail() {
   const blocker = recommendBlocker(app)
   const creditLow = app.creditCheck && !creditOk(app)
   const progress = verificationProgress(app)
-  const emi = emiFor(app.amount, app.tenure)
+  const emi = emiOf(app)
   const lowCreditReason = creditLow ? `Low credit score (${app.creditCheck.score}). Minimum required is ${MIN_CREDIT_SCORE}.` : ''
   const runCredit = () => {
     const score = runCreditCheck(app.id)
@@ -144,7 +144,7 @@ export default function AgentApplicationDetail() {
                   ['Amount', formatINR(app.amount)],
                   ['Tenure', `${app.tenure} months`],
                   ['Monthly EMI', formatINR(emi)],
-                  ['Interest (indicative)', `${INTEREST_RATE}% p.a.`],
+                  ['Interest rate', `${app.interestRatePa}% p.a.`],
                   ['Total payable', formatINR(emi * app.tenure)],
                   ['Purpose', app.purpose],
                 ].map(([k, v]) => (

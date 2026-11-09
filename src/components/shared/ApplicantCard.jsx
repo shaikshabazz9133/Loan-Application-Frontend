@@ -1,13 +1,13 @@
 import { Briefcase, Cake, Calendar, CalendarClock, Crosshair, CreditCard, Fingerprint, Gauge, Hash, IndianRupee, Mail, MapPin, Phone, Target, User, Wallet } from 'lucide-react'
 import { formatDate, formatDateTime, formatINR } from '@/lib/utils'
-import { MAX_FOIR, ageFrom, creditBand, emiFor, maskAadhaar, maskPan, tenureLabel } from '@/lib/kyc'
+import { MAX_FOIR, ageFrom, creditBand, emiOf, maskAadhaar, maskPan, tenureLabel } from '@/lib/kyc'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { InfoGrid } from './InfoGrid'
 import { MapView, googleMapsLink } from './MapView'
 
 export function ApplicantCard({ app, agent }) {
-  const emi = emiFor(app.amount, app.tenure)
+  const emi = emiOf(app)
   const foir = app.income ? emi / app.income : 0
   const band = creditBand(app.creditCheck?.score)
   return (

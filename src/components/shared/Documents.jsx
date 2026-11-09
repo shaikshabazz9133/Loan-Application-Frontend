@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Download, Eye, FileText, ImageIcon, Loader2 } from 'lucide-react'
-import { getDoc, formatBytes, sampleDocSvg } from '@/lib/docs'
+import { formatBytes, sampleDocSvg } from '@/lib/docs'
+import { applicationsApi } from '@/lib/api'
 import { DOC_TYPES } from '@/lib/verification'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const docLabel = (key) => DOC_TYPES.find((d) => d.key === key)?.label || key
 
-/** Opens an uploaded document (from IndexedDB) or a generated sample for demo data. */
+/** Opens an uploaded document (fetched from the API with the user's session) or a generated sample for demo data. */
 export function DocumentViewer({ app, docKey, open, onOpenChange }) {
   const meta = app.documents?.[docKey]
   const [url, setUrl] = useState(null)
@@ -25,14 +26,19 @@ export function DocumentViewer({ app, docKey, open, onOpenChange }) {
       setUrl(sampleDocSvg(docLabel(docKey), app.fullName, app.id))
       return
     }
-    getDoc(meta.key)
+    let cancelled = false
+    applicationsApi
+      .document(app.id, docKey)
       .then((blob) => {
-        if (!blob) return setError('This file is not available on this device. (Demo files are stored in the browser that uploaded them.)')
+        if (cancelled) return
         objectUrl = URL.createObjectURL(blob)
         setUrl(objectUrl)
       })
-      .catch(() => setError('Could not open the file.'))
-    return () => objectUrl && URL.revokeObjectURL(objectUrl)
+      .catch((err) => !cancelled && setError(err.message || 'Could not open the file.'))
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
   }, [open, meta, docKey, app.fullName, app.id])
 
   const isPdf = meta?.type === 'application/pdf' && !meta?.sample

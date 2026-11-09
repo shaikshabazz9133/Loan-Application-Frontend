@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, ArrowRight, Briefcase, Check, CheckCircle2, Crosshair, FileText, FileUp, IndianRupee, Loader2, LocateFixed, MapPin, RefreshCw, Send, ShieldCheck, Trash2, User } from 'lucide-react'
 import { toast } from 'sonner'
-import { useStore, rankAgents } from '@/lib/store'
-import { ASSIGNMENT_RADIUS_KM, EMPLOYMENT_TYPES, LOAN_PURPOSES } from '@/lib/constants'
-import { cn, formatDate, formatINR, uid } from '@/lib/utils'
-import { AADHAAR_DEMO_MODE, INTEREST_RATE, MAX_AGE, MAX_FOIR, MIN_AGE, PAN_RE, TENURES, ageFrom, emiFor, formatAadhaar, isValidAadhaar, makeDemoAadhaar, makeDemoPan, maskAadhaar, tenureLabel } from '@/lib/kyc'
-import { DOC_ACCEPT, formatBytes, putDoc, validateDocFile } from '@/lib/docs'
-import { DOC_TYPES, isDocRequired } from '@/lib/verification'
-import { ACCOUNT_TYPES, bankFromIfsc, isValidAccount, isValidIfsc, maskAccount } from '@/lib/bank'
+import { useStore } from '@/lib/store'
+import { agentsApi, applicationsApi, eligibilityApi, fieldErrors } from '@/lib/api'
+import { cn, formatDate, formatINR } from '@/lib/utils'
+import { PAN_RE, ageFrom, formatAadhaar, isValidAadhaar, maskAadhaar, tenureLabel } from '@/lib/kyc'
+import { formatBytes, validateDocFile } from '@/lib/docs'
+import { isDocRequired } from '@/lib/verification'
+import { bankFromIfsc, isValidAccount, isValidIfsc, maskAccount } from '@/lib/bank'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -26,17 +26,54 @@ const STEPS = [
   { title: 'Review & submit', icon: Check },
 ]
 
-// Handy test points so the 2 km assignment can be tried from anywhere.
-const DEMO_SPOTS = [
-  { label: 'Banjara Hills, Hyderabad', lat: 17.4152, lng: 78.4421, pincode: '500034' },
-  { label: 'Madhapur, Hyderabad', lat: 17.4470, lng: 78.3880, pincode: '500081' },
-  { label: 'Kukatpally, Hyderabad', lat: 17.4920, lng: 78.4040, pincode: '500072' },
-  { label: 'Uppal, Hyderabad (no agent nearby)', lat: 17.4058, lng: 78.5591, pincode: '500039' },
-]
+// Which step shows each field, so a server-side validation error opens the right step.
+const FIELD_STEP = {
+  fullName: 0, mobile: 0, email: 0, dob: 0, aadhaar: 0, pan: 0,
+  amount: 1, tenure: 1, purpose: 1, income: 1, employment: 1,
+  address: 2, city: 2, pincode: 2, location: 2,
+  holder: 3, account: 3, ifsc: 3, type: 3,
+  consent: 4,
+}
+const stepOf = (field) => (field.startsWith('doc_') ? 3 : FIELD_STEP[field] ?? 4)
 
+/** Apply form options (purposes, tenures, limits, documents...) come from GET /applications/options. */
 export default function ApplyLoan() {
-  const { currentUser: me, users, submitApplication } = useStore()
+  const [options, setOptions] = useState(null)
+  const [loadError, setLoadError] = useState('')
+
+  const load = () => {
+    setLoadError('')
+    applicationsApi.options().then(setOptions).catch((err) => setLoadError(err.message))
+  }
+  useEffect(load, [])
+
+  if (options) return <ApplyLoanForm options={options} />
+  return (
+    <div className="mx-auto max-w-4xl">
+      <PageHeader title="Apply for a loan" back={{ to: '/customer', label: 'Dashboard' }} />
+      <Card>
+        <CardContent className="flex min-h-[240px] flex-col items-center justify-center gap-3 p-8 text-center">
+          {loadError ? (
+            <>
+              <AlertTriangle className="size-6 text-amber-600" />
+              <p className="text-sm text-muted-foreground">{loadError}</p>
+              <Button variant="outline" onClick={load}><RefreshCw /> Try again</Button>
+            </>
+          ) : (
+            <Loader2 className="size-6 animate-spin text-muted-foreground" aria-label="Loading form" />
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function ApplyLoanForm({ options: o }) {
+  const { currentUser: me, submitApplication } = useStore()
   const navigate = useNavigate()
+  const radiusKm = o.assignmentRadiusKm
+  const minAge = o.applicantAge.min
+  const maxAge = o.applicantAge.max
   const [step, setStep] = useState(0)
   const [errors, setErrors] = useState({})
   const [geo, setGeo] = useState({ state: 'idle', message: '' })
@@ -59,27 +96,38 @@ export default function ApplyLoan() {
     pincode: '',
     location: null,
   })
-  const [bank, setBank] = useState({ holder: me.name, account: '', confirm: '', ifsc: '', type: 'Savings' })
+  const [bank, setBank] = useState({ holder: me.name, account: '', confirm: '', ifsc: '', type: o.bankAccountTypes[0] })
   const setB = (k, fn = (v) => v) => (e) => {
     setBank((p) => ({ ...p, [k]: fn(e.target.value) }))
     setErrors((er) => ({ ...er, [k]: undefined }))
   }
   const [files, setFiles] = useState({})
   const [consent, setConsent] = useState(false)
-  const emi = emiFor(f.amount, f.tenure)
-  const foir = Number(f.income) ? emi / Number(f.income) : 0
+  // Rate comes from the income/tenure slabs (server config); the server recalculates and saves it on submit.
+  // Credit score, rate and EMI all come from the server (POST /eligibility/quote) - the form never prices a loan.
+  const { quote, checking } = useQuote(f)
+  const emi = quote?.emi || 0
+  const foir = Number(f.income) && emi ? emi / Number(f.income) : 0
   const today = new Date()
   const ymd = (yrs) => new Date(today.getFullYear() - yrs, today.getMonth(), today.getDate()).toISOString().slice(0, 10)
-  const fillDemoIds = (low) => {
-    const initial = (f.fullName.trim().split(' ').pop() || 'K')[0]
-    setF((p) => ({ ...p, dob: p.dob || '1991-05-20', aadhaar: makeDemoAadhaar(), pan: makeDemoPan(initial, low) }))
-    setErrors({})
-    toast(`Filled test IDs (${low ? 'low' : 'good'} credit score)`)
-  }
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }))
   const digits = (k, max) => (e) => setF((p) => ({ ...p, [k]: e.target.value.replace(/\D/g, '').slice(0, max) }))
+  const docTypes = o.documents.types
+  const amountPresets = o.loanAmountPresets.filter((v) => v >= o.loanAmount.min && v <= o.loanAmount.max)
 
-  const nearby = useMemo(() => (f.location ? rankAgents(users, f.location).filter((r) => r.distance <= ASSIGNMENT_RADIUS_KM) : []), [users, f.location])
+  // Active agents within the radius of the shared location, from the server.
+  const [nearby, setNearby] = useState([])
+  useEffect(() => {
+    if (!f.location) return setNearby([])
+    let cancelled = false
+    agentsApi
+      .nearby(f.location)
+      .then((list) => !cancelled && setNearby(list))
+      .catch(() => !cancelled && setNearby([]))
+    return () => {
+      cancelled = true
+    }
+  }, [f.location])
 
   const validateStep = (s) => {
     const e = {}
@@ -89,19 +137,22 @@ export default function ApplyLoan() {
       if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email.'
       const age = ageFrom(f.dob)
       if (!f.dob) e.dob = 'Enter your date of birth.'
-      else if (age < MIN_AGE || age > MAX_AGE) e.dob = `Applicants must be between ${MIN_AGE} and ${MAX_AGE} years old (you are ${age}).`
-      const aErr = aadhaarError(f.aadhaar)
+      else if (age < minAge || age > maxAge) e.dob = `Applicants must be between ${minAge} and ${maxAge} years old (you are ${age}).`
+      const aErr = aadhaarError(f.aadhaar, o.aadhaarDemoMode)
       if (aErr) e.aadhaar = aErr
       if (!PAN_RE.test(f.pan)) e.pan = 'Enter a valid individual PAN, e.g. ABCPK1234D (4th letter is P).'
+      else if (!quote) e.pan = checking ? 'Checking your credit score… please wait a moment.' : 'We could not check your credit score. Please try again.'
+      else if (!quote.eligible) e.pan = `Your credit score ${quote.creditScore} is below the minimum of ${quote.minCreditScore}, so we can't offer a loan right now.`
     }
     if (s === 1) {
       const amt = Number(f.amount)
-      if (!amt || amt < 10000) e.amount = 'Minimum loan amount is ₹10,000.'
-      else if (amt > 5000000) e.amount = 'Maximum loan amount is ₹50,00,000.'
+      if (!amt || amt < o.loanAmount.min) e.amount = `Minimum loan amount is ${formatINR(o.loanAmount.min)}.`
+      else if (amt > o.loanAmount.max) e.amount = `Maximum loan amount is ${formatINR(o.loanAmount.max)}.`
       if (!f.purpose) e.purpose = 'Select a loan purpose.'
-      if (!Number(f.income) || Number(f.income) < 5000) e.income = 'Enter your monthly income (min ₹5,000).'
+      if (!Number(f.income) || Number(f.income) < o.minMonthlyIncome) e.income = `Enter your monthly income (min ${formatINR(o.minMonthlyIncome)}).`
       if (!f.employment) e.employment = 'Select your employment type.'
       if (!f.tenure) e.tenure = 'Choose a loan tenure.'
+      if (Object.keys(e).length === 0 && !quote?.ratePa) e.tenure = 'Calculating your interest rate… please wait a moment.'
     }
     if (s === 2) {
       if (f.address.trim().length < 5) e.address = 'Enter your full address.'
@@ -114,7 +165,7 @@ export default function ApplyLoan() {
       if (!isValidAccount(bank.account)) e.account = 'Enter a valid account number (9–18 digits).'
       if (bank.confirm !== bank.account) e.confirm = 'Account numbers do not match.'
       if (!isValidIfsc(bank.ifsc)) e.ifsc = 'Enter a valid IFSC, e.g. HDFC0001234.'
-      DOC_TYPES.filter((d) => isDocRequired(d, f.employment) && !files[d.key]).forEach((d) => (e[`doc_${d.key}`] = `Upload your ${d.label.toLowerCase()}.`))
+      docTypes.filter((d) => isDocRequired(d, f.employment) && !files[d.key]).forEach((d) => (e[`doc_${d.key}`] = `Upload your ${d.label.toLowerCase()}.`))
     }
     if (s === 4 && !consent) e.consent = 'Please accept to continue.'
     setErrors(e)
@@ -142,26 +193,33 @@ export default function ApplyLoan() {
     )
   }
 
-  const applyDemoSpot = (spot) => {
-    setF((p) => ({ ...p, location: { lat: spot.lat, lng: spot.lng }, city: p.city || 'Hyderabad', pincode: p.pincode || spot.pincode }))
-    setGeo({ state: 'ok', message: `Demo location: ${spot.label}` })
-    setErrors((e) => ({ ...e, location: undefined }))
-  }
-
   const submit = async () => {
     if (!validateStep(4)) return
     setSubmitting(true)
     try {
-      const documents = {}
-      for (const [key, file] of Object.entries(files)) {
-        const docKey = uid('doc')
-        await putDoc(docKey, file)
-        documents[key] = { key: docKey, name: file.name, size: file.size, type: file.type, uploadedAt: new Date().toISOString() }
-      }
-      const r = submitApplication({ ...f, documents, bank: { holder: bank.holder.trim(), account: bank.account, ifsc: bank.ifsc, bankName: bankFromIfsc(bank.ifsc), type: bank.type } })
-      setResult(r)
+      const formData = new FormData()
+      formData.append(
+        'data',
+        JSON.stringify({
+          ...f,
+          amount: Number(f.amount),
+          income: Number(f.income),
+          tenure: Number(f.tenure),
+          bank: { holder: bank.holder.trim(), account: bank.account, ifsc: bank.ifsc, type: bank.type },
+          consent,
+        })
+      )
+      // Only send documents that apply (e.g. drop salary slips picked before switching away from "Salaried").
+      docTypes.forEach((d) => files[d.key] && formData.append(d.key, files[d.key], files[d.key].name))
+      setResult(await submitApplication(formData))
       toast.success('Application submitted successfully')
     } catch (err) {
+      const fe = fieldErrors(err)
+      const fields = Object.keys(fe)
+      if (fields.length) {
+        setErrors(fe)
+        setStep(Math.min(...fields.map(stepOf)))
+      }
       toast.error('Could not submit application', { description: err.message })
     } finally {
       setSubmitting(false)
@@ -204,31 +262,23 @@ export default function ApplyLoan() {
               </div>
 
               <div className="border-t pt-5">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-start gap-2">
-                    <SectionTitle title="Identity (KYC)" text="Used to verify you and check your credit score." />
-                    {AADHAAR_DEMO_MODE && <span className="mt-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">Demo mode</span>}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 text-xs">
-                    <span className="self-center font-semibold text-muted-foreground">Testing?</span>
-                    <button type="button" onClick={() => fillDemoIds(false)} className="rounded-full border bg-card px-2.5 py-1 font-semibold hover:border-primary hover:text-primary">Fill test IDs · good credit</button>
-                    <button type="button" onClick={() => fillDemoIds(true)} className="rounded-full border bg-card px-2.5 py-1 font-semibold hover:border-destructive hover:text-destructive">Fill test IDs · low credit</button>
-                  </div>
+                <div className="mb-4">
+                  <SectionTitle title="Identity (KYC)" text="Used to verify you and check your credit score." />
                 </div>
                 <div className="grid gap-5 sm:grid-cols-3">
-                  <Field label="Date of birth" htmlFor="dob" error={errors.dob} hint={f.dob && !errors.dob ? `Age ${ageFrom(f.dob)}` : `Age ${MIN_AGE}–${MAX_AGE}`} required>
-                    <Input id="dob" type="date" min={ymd(MAX_AGE + 1)} max={ymd(MIN_AGE)} value={f.dob} onChange={set('dob')} aria-invalid={!!errors.dob} />
+                  <Field label="Date of birth" htmlFor="dob" error={errors.dob} hint={f.dob && !errors.dob ? `Age ${ageFrom(f.dob)}` : `Age ${minAge}–${maxAge}`} required>
+                    <Input id="dob" type="date" min={ymd(maxAge + 1)} max={ymd(minAge)} value={f.dob} onChange={set('dob')} aria-invalid={!!errors.dob} />
                   </Field>
                   <Field
                     label="Aadhaar number"
                     htmlFor="aadhaar"
-                    error={errors.aadhaar || (f.aadhaar.length === 12 ? aadhaarError(f.aadhaar) : null)}
+                    error={errors.aadhaar || (f.aadhaar.length === 12 ? aadhaarError(f.aadhaar, o.aadhaarDemoMode) : null)}
                     hint={
                       f.aadhaar.length !== 12
                         ? `${f.aadhaar.length}/12 digits`
                         : isValidAadhaar(f.aadhaar)
                           ? '✓ Valid Aadhaar number'
-                          : '⚠ Checksum does not match. Accepted in demo mode only.'
+                          : '⚠ Checksum does not match. Please double-check the number.'
                     }
                     required
                   >
@@ -245,17 +295,8 @@ export default function ApplyLoan() {
                       }}
                       aria-invalid={!!errors.aadhaar}
                     />
-                    {AADHAAR_DEMO_MODE && (
-                      <button
-                        type="button"
-                        onClick={() => (setF((p) => ({ ...p, aadhaar: makeDemoAadhaar() })), setErrors((er) => ({ ...er, aadhaar: undefined })))}
-                        className="text-xs font-semibold text-primary hover:underline"
-                      >
-                        Use demo Aadhaar
-                      </button>
-                    )}
                   </Field>
-                  <Field label="PAN number" htmlFor="pan" error={errors.pan} hint={PAN_RE.test(f.pan) ? '✓ Valid PAN format' : 'e.g. ABCPK1234D'} required>
+                  <Field label="PAN number" htmlFor="pan" error={errors.pan} hint={PAN_RE.test(f.pan) ? '✓ Valid PAN format' : 'Used to check your credit score'} required>
                     <Input
                       id="pan"
                       autoComplete="off"
@@ -267,6 +308,7 @@ export default function ApplyLoan() {
                     />
                   </Field>
                 </div>
+                {PAN_RE.test(f.pan) && <CreditScoreCard quote={quote} checking={checking} />}
               </div>
             </div>
           )}
@@ -274,13 +316,13 @@ export default function ApplyLoan() {
           {step === 1 && (
             <div className="space-y-5 animate-fade-up">
               <SectionTitle title="Loan details" text="Tell us how much you need and why." />
-              <Field label="Loan amount" htmlFor="amount" error={errors.amount} hint="Between ₹10,000 and ₹50,00,000" required>
+              <Field label="Loan amount" htmlFor="amount" error={errors.amount} hint={`Between ${formatINR(o.loanAmount.min)} and ${formatINR(o.loanAmount.max)}`} required>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-muted-foreground">₹</span>
                   <Input id="amount" inputMode="numeric" placeholder="1,00,000" className="h-12 pl-8 text-lg font-bold tabular" value={f.amount ? Number(f.amount).toLocaleString('en-IN') : ''} onChange={digits('amount', 8)} aria-invalid={!!errors.amount} />
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1">
-                  {[50000, 100000, 200000, 500000].map((v) => (
+                  {amountPresets.map((v) => (
                     <button key={v} type="button" onClick={() => setF((p) => ({ ...p, amount: String(v) }))} className={cn('rounded-full border px-3 py-1 text-xs font-semibold transition hover:border-primary hover:text-primary', Number(f.amount) === v && 'border-primary bg-accent text-primary')}>
                       {formatINR(v)}
                     </button>
@@ -291,13 +333,13 @@ export default function ApplyLoan() {
                 <Field label="Loan purpose" htmlFor="purpose" error={errors.purpose} required>
                   <NativeSelect id="purpose" value={f.purpose} onChange={set('purpose')} aria-invalid={!!errors.purpose}>
                     <option value="" disabled>Select purpose</option>
-                    {LOAN_PURPOSES.map((p) => <option key={p}>{p}</option>)}
+                    {o.loanPurposes.map((p) => <option key={p}>{p}</option>)}
                   </NativeSelect>
                 </Field>
                 <Field label="Employment type" htmlFor="employment" error={errors.employment} required>
                   <NativeSelect id="employment" value={f.employment} onChange={set('employment')} aria-invalid={!!errors.employment}>
                     <option value="" disabled>Select employment type</option>
-                    {EMPLOYMENT_TYPES.map((p) => <option key={p}>{p}</option>)}
+                    {o.employmentTypes.map((p) => <option key={p}>{p}</option>)}
                   </NativeSelect>
                 </Field>
               </div>
@@ -308,8 +350,8 @@ export default function ApplyLoan() {
                 </div>
               </Field>
               <Field label="Loan tenure" error={errors.tenure} required>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-9" role="radiogroup" aria-label="Loan tenure">
-                  {TENURES.map((m) => (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(4.5rem,1fr))]" role="radiogroup" aria-label="Loan tenure">
+                  {o.tenuresMonths.map((m) => (
                     <button
                       key={m}
                       type="button"
@@ -329,31 +371,13 @@ export default function ApplyLoan() {
                 </div>
               </Field>
 
-              {emi > 0 && (
-                <div className="grid gap-4 rounded-xl bg-gradient-to-br from-teal-600 to-teal-800 p-5 text-white sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Estimated EMI</p>
-                    <p className="mt-1 text-3xl font-extrabold tabular">{formatINR(emi)}<span className="text-base font-semibold text-teal-100">/mo</span></p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Total payable</p>
-                    <p className="mt-1 text-xl font-bold tabular">{formatINR(emi * f.tenure)}</p>
-                    <p className="text-xs text-teal-100">Interest {formatINR(emi * f.tenure - f.amount)} at {INTEREST_RATE}% p.a.</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">EMI vs income</p>
-                    <p className="mt-1 text-xl font-bold tabular">{Number(f.income) ? `${Math.round(foir * 100)}%` : '—'}</p>
-                    <p className="text-xs text-teal-100">{foir > MAX_FOIR ? '⚠ Above 50% — may be rejected' : 'Within the 50% limit'}</p>
-                  </div>
-                  <p className="text-[11px] text-teal-100/80 sm:col-span-3">Indicative only. Final rate depends on your credit score and verification.</p>
-                </div>
-              )}
+              {Number(f.amount) > 0 && Number(f.tenure) > 0 && <LoanQuote quote={quote} checking={checking} amount={Number(f.amount)} tenure={Number(f.tenure)} hasIncome={Number(f.income) > 0} foirWarning={foir > o.maxFoir ? `Your EMI is ${Math.round(foir * 100)}% of your income (limit ${Math.round(o.maxFoir * 100)}%). The application may be rejected.` : null} />}
             </div>
           )}
 
           {step === 2 && (
             <div className="space-y-5 animate-fade-up">
-              <SectionTitle title="Address & location" text={`Your GPS location lets verified agents within ${ASSIGNMENT_RADIUS_KM} km see your request.`} />
+              <SectionTitle title="Address & location" text={`Your GPS location lets verified agents within ${radiusKm} km see your request.`} />
               <Field label="Address" htmlFor="address" error={errors.address} required>
                 <Input id="address" placeholder="House no., street, locality" value={f.address} onChange={set('address')} aria-invalid={!!errors.address} />
               </Field>
@@ -396,24 +420,15 @@ export default function ApplyLoan() {
                 )}
                 {errors.location && !f.location && <p className="mt-3 text-xs font-medium text-destructive">{errors.location}</p>}
 
-                <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-semibold text-muted-foreground">Testing? Use a demo location:</span>
-                  {DEMO_SPOTS.map((s) => (
-                    <button key={s.label} type="button" onClick={() => applyDemoSpot(s)} className="rounded-full border bg-card px-2.5 py-1 font-semibold transition hover:border-primary hover:text-primary">
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-
                 {f.location && (
                   <div className="mt-4 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
                     <MapView
                       className="h-64"
                       center={f.location}
-                      radiusKm={ASSIGNMENT_RADIUS_KM}
+                      radiusKm={radiusKm}
                       markers={[
                         { id: 'me', position: f.location, label: 'You', kind: 'primary' },
-                        ...nearby.map((r) => ({ id: r.agent.id, position: r.agent.location, label: `${r.agent.name} · ${r.distance.toFixed(1)} km`, kind: 'agent' })),
+                        ...nearby.map((a) => ({ id: a.id, position: a.location, label: `${a.name} · ${a.distanceKm.toFixed(1)} km`, kind: 'agent' })),
                       ]}
                     />
                     <NearbyAgents nearby={nearby} />
@@ -432,7 +447,7 @@ export default function ApplyLoan() {
                 </Field>
                 <Field label="Account type" htmlFor="acctype">
                   <NativeSelect id="acctype" value={bank.type} onChange={setB('type')}>
-                    {ACCOUNT_TYPES.map((t) => <option key={t}>{t}</option>)}
+                    {o.bankAccountTypes.map((t) => <option key={t}>{t}</option>)}
                   </NativeSelect>
                 </Field>
                 <Field label="Account number" htmlFor="account" error={errors.account} required>
@@ -444,21 +459,17 @@ export default function ApplyLoan() {
                 <Field label="IFSC code" htmlFor="ifsc" error={errors.ifsc} hint={isValidIfsc(bank.ifsc) ? `✓ ${bankFromIfsc(bank.ifsc)}` : 'e.g. HDFC0001234 — printed on your cheque book'} required>
                   <Input id="ifsc" autoComplete="off" className="uppercase tabular tracking-wider" placeholder="HDFC0001234" value={bank.ifsc} onChange={setB('ifsc', (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11))} aria-invalid={!!errors.ifsc} />
                 </Field>
-                <div className="flex items-end">
-                  <button type="button" onClick={() => (setBank((p) => ({ ...p, account: '50100234567890', confirm: '50100234567890', ifsc: 'HDFC0001234' })), setErrors((er) => ({ ...er, account: undefined, confirm: undefined, ifsc: undefined })))} className="mb-2 rounded-full border bg-card px-2.5 py-1 text-xs font-semibold hover:border-primary hover:text-primary">
-                    Testing? Fill a sample account
-                  </button>
-                </div>
               </div>
 
               <div className="border-t pt-5">
-              <SectionTitle title="Upload documents" text="JPG, PNG or PDF, up to 5 MB each. Clear photos help us verify you faster." />
+              <SectionTitle title="Upload documents" text={`JPG, PNG, WEBP or PDF, up to ${o.documents.maxSizeMb} MB each. Clear photos help us verify you faster.`} />
               </div>
               <div className="space-y-3">
-                {DOC_TYPES.map((d) => (
+                {docTypes.map((d) => (
                   <DocUpload
                     key={d.key}
                     doc={d}
+                    rules={o.documents}
                     required={isDocRequired(d, f.employment)}
                     employment={f.employment}
                     file={files[d.key]}
@@ -482,15 +493,15 @@ export default function ApplyLoan() {
             <div className="space-y-6 animate-fade-up">
               <SectionTitle title="Review your application" text="Please confirm everything is correct before submitting." />
               <ReviewBlock title="Personal & KYC" onEdit={() => setStep(0)} rows={[['Full name', f.fullName], ['Date of birth', `${formatDate(f.dob)} (${ageFrom(f.dob)} yrs)`], ['Mobile', f.mobile], ['Email', f.email], ['Aadhaar', maskAadhaar(f.aadhaar)], ['PAN', f.pan]]} />
-              <ReviewBlock title="Loan" onEdit={() => setStep(1)} rows={[['Amount', formatINR(f.amount)], ['Tenure', tenureLabel(Number(f.tenure))], ['Estimated EMI', `${formatINR(emi)}/month`], ['Purpose', f.purpose], ['Monthly income', formatINR(f.income)], ['Employment', f.employment]]} />
+              <ReviewBlock title="Loan" onEdit={() => setStep(1)} rows={[['Amount', formatINR(f.amount)], ['Tenure', tenureLabel(Number(f.tenure))], ['Credit score', quote ? `${quote.creditScore} (${quote.creditBand})` : '—'], ['Interest rate', `${quote?.ratePa}% p.a.`], ['Monthly EMI', formatINR(emi)], ['Total payable', formatINR(quote?.totalPayable)], ['Purpose', f.purpose], ['Monthly income', formatINR(f.income)], ['Employment', f.employment]]} />
               <ReviewBlock title="Address" onEdit={() => setStep(2)} rows={[['Address', f.address], ['City', f.city], ['Pincode', f.pincode], ['GPS', `${f.location.lat.toFixed(5)}, ${f.location.lng.toFixed(5)}`]]} />
               <ReviewBlock title="Disbursement account" onEdit={() => setStep(3)} rows={[['Account holder', bank.holder], ['Bank', bankFromIfsc(bank.ifsc)], ['Account number', maskAccount(bank.account)], ['IFSC', bank.ifsc], ['Type', bank.type]]} />
-              <ReviewBlock title="Documents" onEdit={() => setStep(3)} rows={DOC_TYPES.filter((d) => files[d.key]).map((d) => [d.label, `${files[d.key].name} · ${formatBytes(files[d.key].size)}`])} />
+              <ReviewBlock title="Documents" onEdit={() => setStep(3)} rows={docTypes.filter((d) => files[d.key]).map((d) => [d.label, `${files[d.key].name} · ${formatBytes(files[d.key].size)}`])} />
               <label className={cn('flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-sm', errors.consent && 'border-destructive bg-red-50/50')}>
                 <Checkbox className="mt-0.5" checked={consent} onCheckedChange={(v) => (setConsent(!!v), setErrors((e) => ({ ...e, consent: undefined })))} />
                 <span>
                   <span className="flex items-center gap-1.5 font-semibold"><ShieldCheck className="size-4 text-primary" /> I authorise LendWise to check my credit score</span>
-                  <span className="mt-0.5 block text-muted-foreground">I confirm the details and documents are true, and I consent to a credit bureau check using my PAN. Applications with a credit score below 650 are not approved.</span>
+                  <span className="mt-0.5 block text-muted-foreground">I confirm the details and documents are true, and I consent to a credit bureau check using my PAN. Applications with a credit score below {o.minCreditScore} are not approved.</span>
                   {errors.consent && <span className="mt-1 block text-xs font-medium text-destructive">{errors.consent}</span>}
                 </span>
               </label>
@@ -515,7 +526,7 @@ export default function ApplyLoan() {
               <Button onClick={next}>Continue <ArrowRight /></Button>
             ) : (
               <Button onClick={submit} disabled={submitting} size="lg">
-                {submitting ? <><Loader2 className="animate-spin" /> Uploading documents…</> : <><Send /> Submit application</>}
+                {submitting ? <><Loader2 className="animate-spin" /> Submitting…</> : <><Send /> Submit application</>}
               </Button>
             )}
           </div>
@@ -526,12 +537,106 @@ export default function ApplyLoan() {
 }
 
 /** Clear, specific Aadhaar messages (length → first digit → UIDAI Verhoeff check digit). */
-function aadhaarError(n) {
+function aadhaarError(n, demoMode) {
   if (!n) return 'Enter your 12-digit Aadhaar number.'
   if (n.length !== 12) return `Aadhaar numbers have 12 digits. You've entered ${n.length}.`
   if (!/^[2-9]/.test(n)) return 'Aadhaar numbers never start with 0 or 1. Please check the first digit.'
-  if (!isValidAadhaar(n) && !AADHAAR_DEMO_MODE) return "This number fails UIDAI's check-digit test, so one digit is likely mistyped or two digits are swapped. Please compare it with your Aadhaar card."
+  if (!isValidAadhaar(n) && !demoMode) return "This number fails UIDAI's check-digit test, so one digit is likely mistyped or two digits are swapped. Please compare it with your Aadhaar card."
   return null
+}
+
+/** Asks the server for the credit score (as soon as the PAN is valid) and the price (once amount, income and tenure are set). */
+function useQuote(f) {
+  const [quote, setQuote] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const amount = Number(f.amount) || null
+  const income = Number(f.income) || null
+  const tenure = Number(f.tenure) || null
+  useEffect(() => {
+    if (!PAN_RE.test(f.pan)) {
+      setQuote(null)
+      return
+    }
+    let cancelled = false
+    setChecking(true)
+    const timer = setTimeout(() => {
+      const priced = amount && income && tenure
+      eligibilityApi
+        .quote(priced ? { pan: f.pan, amount, income, tenure } : { pan: f.pan })
+        .then((q) => !cancelled && setQuote(q))
+        .catch(() => !cancelled && setQuote(null))
+        .finally(() => !cancelled && setChecking(false))
+    }, 350) // wait until the customer stops typing
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [f.pan, amount, income, tenure])
+  return { quote, checking }
+}
+
+const BAND_STYLE = {
+  Excellent: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+  Good: 'bg-teal-50 text-teal-800 ring-teal-200',
+  Fair: 'bg-amber-50 text-amber-800 ring-amber-200',
+  Poor: 'bg-red-50 text-red-800 ring-red-200',
+}
+
+function CreditScoreCard({ quote, checking }) {
+  if (!quote) {
+    return (
+      <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+        {checking ? <><Loader2 className="size-4 animate-spin" /> Checking your credit score…</> : 'Could not check your credit score. Edit your PAN to try again.'}
+      </p>
+    )
+  }
+  return (
+    <div className={cn('mt-4 flex items-center justify-between gap-3 rounded-xl p-4 ring-1', BAND_STYLE[quote.creditBand])}>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider opacity-80">Your CIBIL score</p>
+        <p className="text-sm">{quote.eligible ? 'You are eligible to apply.' : `Minimum ${quote.minCreditScore} needed to apply.`}</p>
+      </div>
+      <div className="text-right">
+        <p className="text-3xl font-extrabold tabular">{quote.creditScore}</p>
+        <p className="text-xs font-bold">{quote.creditBand}</p>
+      </div>
+    </div>
+  )
+}
+
+/** Rate, EMI and the total in one simple line: principal + interest = total payable. */
+function LoanQuote({ quote, checking, amount, tenure, hasIncome, foirWarning }) {
+  let body
+  if (!quote) body = <p className="text-sm text-muted-foreground">Enter your PAN in the previous step to see your interest rate.</p>
+  else if (!quote.eligible) body = <p className="text-sm font-medium text-destructive">Your credit score {quote.creditScore} is below {quote.minCreditScore}, so we can&apos;t offer a loan right now.</p>
+  else if (!hasIncome) body = <p className="text-sm text-muted-foreground">Enter your monthly income to see your interest rate and EMI.</p>
+  else if (!quote.ratePa) body = <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Calculating…</p>
+  else
+    body = (
+      <>
+        <div className={cn('grid grid-cols-3 gap-3 transition-opacity', checking && 'opacity-60')}>
+          <QuoteFigure label="Interest rate" value={`${quote.ratePa}%`} sub="per year" />
+          <QuoteFigure label="Monthly EMI" value={formatINR(quote.emi)} sub={`for ${tenure} months`} highlight />
+          <QuoteFigure label="Total payable" value={formatINR(quote.totalPayable)} />
+        </div>
+        <p className="mt-4 rounded-lg bg-muted/60 px-3 py-2 text-center text-sm tabular">
+          {formatINR(amount)} loan + {formatINR(quote.totalInterest)} interest = <b>{formatINR(quote.totalPayable)}</b>
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">Rate based on your CIBIL score {quote.creditScore}, monthly income and tenure.</p>
+        {foirWarning && <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{foirWarning}</p>}
+      </>
+    )
+  return <div className="rounded-xl border bg-card p-4 sm:p-5">{body}</div>
+}
+
+function QuoteFigure({ label, value, sub, highlight }) {
+  return (
+    <div className={cn('rounded-lg p-3', highlight ? 'bg-primary text-primary-foreground' : 'bg-muted/60')}>
+      <p className={cn('text-[11px] font-semibold uppercase tracking-wider', highlight ? 'opacity-90' : 'text-muted-foreground')}>{label}</p>
+      <p className="mt-1 text-lg font-extrabold tabular sm:text-2xl">{value}</p>
+      {sub && <p className={cn('text-[11px]', highlight ? 'opacity-90' : 'text-muted-foreground')}>{sub}</p>}
+    </div>
+  )
 }
 
 function SectionTitle({ title, text }) {
@@ -555,14 +660,14 @@ function NearbyAgents({ nearby }) {
         </div>
       ) : (
         <ul className="mt-3 space-y-2">
-          {nearby.slice(0, 4).map((r) => (
-            <li key={r.agent.id} className="flex items-center gap-3 rounded-lg p-2">
-              <Avatar name={r.agent.name} className="size-8" />
+          {nearby.slice(0, 4).map((a) => (
+            <li key={a.id} className="flex items-center gap-3 rounded-lg p-2">
+              <Avatar name={a.name} className="size-8" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{r.agent.name}</p>
-                <p className="text-xs text-muted-foreground">{r.agent.area}</p>
+                <p className="truncate text-sm font-semibold">{a.name}</p>
+                <p className="text-xs text-muted-foreground">{a.area}</p>
               </div>
-              <span className="text-xs font-bold tabular text-primary">{r.distance.toFixed(1)} km</span>
+              <span className="text-xs font-bold tabular text-primary">{a.distanceKm.toFixed(1)} km</span>
             </li>
           ))}
         </ul>
@@ -571,7 +676,7 @@ function NearbyAgents({ nearby }) {
   )
 }
 
-function DocUpload({ doc, required, employment, file, error, onChange }) {
+function DocUpload({ doc, rules, required, employment, file, error, onChange }) {
   const input = useRef(null)
   const [drag, setDrag] = useState(false)
   const [localError, setLocalError] = useState('')
@@ -580,7 +685,7 @@ function DocUpload({ doc, required, employment, file, error, onChange }) {
 
   const pick = (f) => {
     if (!f) return
-    const err = validateDocFile(f)
+    const err = validateDocFile(f, rules)
     setLocalError(err || '')
     if (!err) onChange(f)
   }
@@ -614,7 +719,7 @@ function DocUpload({ doc, required, employment, file, error, onChange }) {
         </div>
       </div>
       <div className="flex gap-2">
-        <input ref={input} type="file" accept={DOC_ACCEPT} className="sr-only" onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ''))} aria-label={`Upload ${doc.label}`} />
+        <input ref={input} type="file" accept={rules.allowedMimeTypes.join(',')} className="sr-only" onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ''))} aria-label={`Upload ${doc.label}`} />
         <Button type="button" size="sm" variant={file ? 'outline' : 'default'} onClick={() => input.current?.click()}>
           {file ? <><RefreshCw /> Replace</> : <><FileUp /> Upload</>}
         </Button>

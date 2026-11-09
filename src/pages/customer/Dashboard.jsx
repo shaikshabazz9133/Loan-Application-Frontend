@@ -3,7 +3,7 @@ import { ArrowRight, CheckCircle2, Clock, FileText, Plus, Sparkles, XCircle } fr
 import { useStore } from '@/lib/store'
 import { isApproved, isPending, isRejected } from '@/lib/constants'
 import { formatDate, formatINR } from '@/lib/utils'
-import { emiFor } from '@/lib/kyc'
+import { emiOf } from '@/lib/kyc'
 import { bankLabel } from '@/lib/bank'
 import { STATUS } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
@@ -70,7 +70,7 @@ export default function CustomerDashboard() {
                 {[
                   ['Loan amount', formatINR(latest.amount)],
                   ['Tenure', `${latest.tenure} months`],
-                  ['Monthly EMI', formatINR(emiFor(latest.amount, latest.tenure))],
+                  ['Monthly EMI', formatINR(emiOf(latest))],
                 ].map(([k, v]) => (
                   <div key={k} className="px-2 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{k}</p>
@@ -107,7 +107,7 @@ export default function CustomerDashboard() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-bold tabular">{formatINR(a.amount)}</p>
-                      <p className="truncate text-xs text-muted-foreground">{a.tenure} months · EMI {formatINR(emiFor(a.amount, a.tenure))}</p>
+                      <p className="truncate text-xs text-muted-foreground">{a.tenure} months · EMI {formatINR(emiOf(a))}</p>
                       <p className="truncate text-xs text-muted-foreground">{a.purpose} · {formatDate(a.createdAt)}</p>
                     </div>
                     <StatusBadge status={a.status} audience="customer" />

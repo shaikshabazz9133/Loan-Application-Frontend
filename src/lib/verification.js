@@ -1,5 +1,5 @@
 import { STATUS } from './constants'
-import { MAX_FOIR, MIN_CREDIT_SCORE, ageFrom, emiFor, formatAadhaar, isValidAadhaar, tenureLabel } from './kyc'
+import { MAX_FOIR, MIN_CREDIT_SCORE, ageFrom, emiOf, formatAadhaar, isValidAadhaar, tenureLabel } from './kyc'
 import { formatDate, formatINR } from './utils'
 import { holderMatches } from './bank'
 
@@ -18,7 +18,7 @@ export const requiredDocs = (app) => DOC_TYPES.filter((d) => isDocRequired(d, ap
 
 /** Every customer field the agent must verify, with the value shown next to it. */
 export function fieldChecks(app) {
-  const emi = emiFor(app.amount, app.tenure)
+  const emi = emiOf(app)
   const foir = app.income ? emi / app.income : 0
   return [
     { key: 'identity', label: 'Name & date of birth', value: `${app.fullName} · ${formatDate(app.dob)} (${ageFrom(app.dob)} yrs)` },
@@ -29,7 +29,7 @@ export function fieldChecks(app) {
     {
       key: 'loan',
       label: 'Loan amount & tenure',
-      value: `${formatINR(app.amount)} · ${tenureLabel(app.tenure)} · EMI ${formatINR(emi)}`,
+      value: `${formatINR(app.amount)} · ${tenureLabel(app.tenure)} · ${app.interestRatePa}% p.a. · EMI ${formatINR(emi)}`,
       warn: foir > MAX_FOIR ? `EMI is ${Math.round(foir * 100)}% of income (limit ${MAX_FOIR * 100}%)` : null,
     },
     {

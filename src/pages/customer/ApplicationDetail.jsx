@@ -2,7 +2,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Briefcase, Cake, Calendar, CalendarClock, CreditCard, FileText, Fingerprint, Gauge, Mail, MapPin, Phone, User, Wallet } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { formatDate, formatINR } from '@/lib/utils'
-import { INTEREST_RATE, ageFrom, creditBand, emiFor, maskAadhaar, maskPan, tenureLabel } from '@/lib/kyc'
+import { ageFrom, creditBand, emiOf, maskAadhaar, maskPan, tenureLabel } from '@/lib/kyc'
 import { DocumentList } from '@/components/shared/Documents'
 import { DisbursementCard, LoanOutcomeBanner } from '@/components/shared/Disbursement'
 import { Badge } from '@/components/ui/badge'
@@ -24,7 +24,7 @@ export default function CustomerApplicationDetail() {
 
   const agent = getUser(app.agentId)
 
-  const emi = emiFor(app.amount, app.tenure)
+  const emi = emiOf(app)
   const steps = buildSteps(app, agent?.name)
   const doneSteps = steps.filter((st) => st.state === 'complete').length
   const band = app.creditCheck ? creditBand(app.creditCheck.score) : null
@@ -32,7 +32,7 @@ export default function CustomerApplicationDetail() {
   const summary = [
     ['Loan amount', formatINR(app.amount), app.purpose],
     ['Tenure', `${app.tenure} months`, app.tenure % 12 === 0 ? `${app.tenure / 12} year${app.tenure > 12 ? 's' : ''}` : `${(app.tenure / 12).toFixed(1)} years`],
-    ['Monthly EMI', formatINR(emi), `${INTEREST_RATE}% p.a. indicative`],
+    ['Monthly EMI', formatINR(emi), `${app.interestRatePa}% p.a.`],
     ['Total payable', formatINR(emi * app.tenure), `Interest ${formatINR(emi * app.tenure - app.amount)}`],
   ]
 
