@@ -55,7 +55,7 @@ export default function CustomerDetail() {
               { key: 'amt', header: 'Amount', cell: (a) => <b className="tabular">{formatINR(a.amount)}</b> },
               { key: 't', header: 'Tenure', cell: (a) => `${a.tenure} months` },
               { key: 'p', header: 'Purpose', cell: (a) => a.purpose },
-              { key: 'ag', header: 'Agent', cell: (a) => getUser(a.agentId)?.name || '—' },
+              { key: 'ag', header: 'Agent', cell: (a) => a.agentName || '—' },
               { key: 's', header: 'Status', cell: (a) => <StatusBadge status={a.status} /> },
             ]}
             mobileCard={(a) => (

@@ -33,7 +33,7 @@ function actionFor(a) {
 }
 
 export default function ManagerApplications() {
-  const { applications, users, getUser } = useStore()
+  const { applications, users } = useStore()
   const [params, setParams] = useSearchParams()
   const tab = FILTERS[params.get('status')] ? params.get('status') : 'all'
   const [q, setQ] = useState('')
@@ -46,7 +46,7 @@ export default function ManagerApplications() {
     .filter((a) => !agentId || a.agentId === agentId)
     .filter((a) => {
       const s = q.toLowerCase()
-      return !s || [a.fullName, a.mobile, a.id, getUser(a.agentId)?.name || ''].some((v) => v.toLowerCase().includes(s))
+      return !s || [a.fullName, a.mobile, a.id, a.agentName || ''].some((v) => v.toLowerCase().includes(s))
     })
 
   return (
@@ -75,9 +75,9 @@ export default function ManagerApplications() {
           empty={<EmptyState icon={FileText} title="No applications found" description="Try a different filter." />}
           columns={[
             { key: 'c', header: 'Customer', cell: (a) => <div className="flex items-center gap-3"><Avatar name={a.fullName} className="size-8 text-[10px]" /><div><p className="font-semibold">{a.fullName}</p><p className="text-xs text-muted-foreground">{a.id} · {formatDate(a.createdAt)}</p></div></div> },
-            { key: 'ag', header: 'Agent', cell: (a) => { const ag = getUser(a.agentId); return ag ? <div><p className="font-medium">{ag.name}</p><p className="text-xs text-muted-foreground">{ag.area}</p></div> : <span className="font-semibold text-amber-600">Not accepted yet</span> } },
+            { key: 'ag', header: 'Agent', cell: (a) => (a.agentName ? <p className="font-medium">{a.agentName}</p> : <span className="font-semibold text-amber-600">Not accepted yet</span>) },
             { key: 'amt', header: 'Loan amount', cell: (a) => <div><b className="tabular">{formatINR(a.amount)}</b><p className="text-xs text-muted-foreground">{a.tenure} months</p></div> },
-            { key: 'cs', header: 'Credit', cell: (a) => (a.creditCheck ? <Badge variant={creditBand(a.creditCheck.score).tone}>{a.creditCheck.score}</Badge> : <span className="text-xs text-muted-foreground">—</span>) },
+            { key: 'cs', header: 'Credit', cell: (a) => (a.creditScore != null ? <Badge variant={creditBand(a.creditScore).tone}>{a.creditScore}</Badge> : <span className="text-xs text-muted-foreground">—</span>) },
             { key: 'p', header: 'Purpose', cell: (a) => a.purpose },
             { key: 's', header: 'Status', cell: (a) => <StatusBadge status={a.status} /> },
             { key: 'x', header: 'Action', headClassName: 'text-right', className: 'text-right', cell: (a) => { const x = actionFor(a); return <Button size="sm" variant={x.variant} asChild><Link to={`/manager/applications/${a.id}`}>{x.label}</Link></Button> } },
@@ -88,7 +88,7 @@ export default function ManagerApplications() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2"><p className="truncate font-semibold">{a.fullName}</p><StatusBadge status={a.status} /></div>
                 <p className="text-sm"><b className="tabular">{formatINR(a.amount)}</b> · {a.tenure} months · {a.purpose}</p>
-                <p className="text-xs text-muted-foreground">Agent: {getUser(a.agentId)?.name || 'Not accepted yet'} · {formatDate(a.createdAt)}</p>
+                <p className="text-xs text-muted-foreground">Agent: {a.agentName || 'Not accepted yet'} · {formatDate(a.createdAt)}</p>
               </div>
             </div>
           )}

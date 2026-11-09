@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Bell, Briefcase, ChevronDown, FilePlus2, FileText, LayoutDashboard, LogOut, Menu, RotateCcw, ShieldCheck, User, Users } from 'lucide-react'
+import { Bell, Briefcase, ChevronDown, FileText, LayoutDashboard, LogOut, Menu, RefreshCw, ShieldCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
-import { useStore, openRequestsFor } from '@/lib/store'
+import { useStore } from '@/lib/store'
 import { STATUS } from '@/lib/constants'
 import { Logo } from '@/components/shared/Logo'
 import { Avatar } from '@/components/ui/avatar'
@@ -12,19 +12,13 @@ import { SheetContent } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
-const ROLE_LABEL = { customer: 'Customer', agent: 'Field Agent', manager: 'Branch Manager' }
-const ROLE_ICON = { customer: User, agent: Briefcase, manager: ShieldCheck }
+const ROLE_LABEL = { agent: 'Field Agent', manager: 'Branch Manager' }
+const ROLE_ICON = { agent: Briefcase, manager: ShieldCheck }
 
 function useNav() {
   const { currentUser: me, applications } = useStore()
-  if (me.role === 'customer')
-    return [
-      { to: '/customer', label: 'Dashboard', icon: LayoutDashboard, end: true },
-      { to: '/customer/apply', label: 'Apply for loan', icon: FilePlus2 },
-      { to: '/customer/applications', label: 'My applications', icon: FileText },
-    ]
   if (me.role === 'agent') {
-    const fresh = openRequestsFor(me, applications).length
+    const fresh = applications.filter((a) => a.status === STATUS.UNASSIGNED).length
     return [
       { to: '/agent', label: 'Dashboard', icon: LayoutDashboard, end: true },
       { to: '/agent/applications', label: 'Applications', icon: FileText, badge: fresh },
@@ -86,10 +80,9 @@ function Sidebar({ onNavigate }) {
 }
 
 export default function AppShell() {
-  const { currentUser: me, logout, resetDemo } = useStore()
+  const { currentUser: me, logout, refresh } = useStore()
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
-  const { pathname } = useLocation()
 
   return (
     <div className="min-h-screen lg:pl-64">
@@ -133,14 +126,8 @@ export default function AppShell() {
                 <span className="block truncate font-normal">{me.email}</span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => {
-                  resetDemo()
-                  toast.success('Local application data cleared')
-                  if (pathname.split('/').length > 3) navigate(`/${me.role}`)
-                }}
-              >
-                <RotateCcw /> Clear application data
+              <DropdownMenuItem onSelect={() => refresh().then(() => toast.success('Up to date')).catch((e) => toast.error(e.message))}>
+                <RefreshCw /> Refresh data
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive [&_svg]:text-destructive"

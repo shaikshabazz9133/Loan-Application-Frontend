@@ -1,49 +1,33 @@
 import { Check, Clock, Loader2, X, Minus } from 'lucide-react'
 import { STATUS } from '@/lib/constants'
-import { bankLabel } from '@/lib/bank'
-import { formatINR } from '@/lib/utils'
-import { cn, formatDateTime } from '@/lib/utils'
+import { cn, formatDateTime, formatINR } from '@/lib/utils'
 
-/** Build the 5-step customer-facing progress from an application. */
-export function buildSteps(app, agentName) {
-  const s = app.status
-  const findAt = (action) => app.history.find((h) => h.action === action)?.at
-  const done = (title, description, at) => ({ title, state: 'complete', label: 'Completed', description, at })
-  const steps = []
+/**
+ * The 4 steps a customer sees, built from the public status (POST /applications/track):
+ * submitted -> agent review -> manager approval -> money sent.
+ */
+export function buildSteps(t) {
+  const s = t.status
+  const at = (action) => t.steps.find((h) => h.action === action)?.at
+  const done = (title, description, when, label = 'Done') => ({ title, state: 'complete', label, description, at: when })
+  const rejectedByAgent = s === STATUS.AGENT_REJECTED
+  const rejected = s === STATUS.REJECTED || rejectedByAgent
+  const steps = [done('Application submitted', 'We received your application and documents.', t.createdAt)]
 
-  steps.push(done('Application submitted', 'You submitted your loan application.', app.createdAt))
+  if (s === STATUS.UNASSIGNED) steps.push({ title: 'Agent review', state: 'current', label: 'Waiting', description: 'Waiting for an agent to pick up your application.' })
+  else if (s === STATUS.ASSIGNED) steps.push({ title: 'Agent review', state: 'current', label: 'In progress', description: `${t.agentName || 'An agent'} is checking your details and documents.`, at: at('Accepted by agent') })
+  else if (rejectedByAgent) steps.push({ title: 'Agent review', state: 'failed', label: 'Not approved', description: t.agentDecision?.reason, at: t.agentDecision?.at })
+  else if (s === STATUS.REJECTED && !t.agentDecision) steps.push({ title: 'Agent review', state: 'skipped', label: 'Skipped', description: 'Closed before an agent review.' })
+  else steps.push(done('Agent review', `${t.agentName || 'The agent'} checked your details and recommended approval.`, t.agentDecision?.at))
 
-  if (s === STATUS.UNASSIGNED) {
-    steps.push({ title: 'Agent assigned', state: 'current', label: 'In progress', description: 'Your application is shared with agents in your area. The first agent to accept it will handle your loan.' })
-  } else {
-    steps.push(done('Agent assigned', `${agentName ? `${agentName}, an agent in your area,` : 'An agent in your area'} accepted your application.`, findAt('Accepted by agent')))
-  }
+  if (s === STATUS.AGENT_APPROVED) steps.push({ title: 'Final approval', state: 'current', label: 'In progress', description: 'The branch manager is reviewing your application.' })
+  else if (s === STATUS.APPROVED || s === STATUS.DISBURSED) steps.push(done('Final approval', 'Your loan is approved.', t.managerDecision?.at, 'Approved'))
+  else if (s === STATUS.REJECTED) steps.push({ title: 'Final approval', state: 'failed', label: 'Not approved', description: t.managerDecision?.reason, at: t.managerDecision?.at })
+  else steps.push({ title: 'Final approval', state: rejectedByAgent ? 'skipped' : 'pending', label: rejectedByAgent ? 'Skipped' : 'Pending', description: 'The branch manager gives the final decision.' })
 
-  if ([STATUS.UNASSIGNED].includes(s)) steps.push({ title: 'Agent verification', state: 'pending', label: 'Pending', description: 'Agent reviews your information.' })
-  else if ([STATUS.ASSIGNED, STATUS.IN_VERIFICATION].includes(s))
-    steps.push({ title: 'Agent verification', state: 'current', label: 'In progress', description: 'Agent reviews your information.' })
-  else if (s === STATUS.AGENT_REJECTED)
-    steps.push({ title: 'Agent verification', state: 'failed', label: 'Not verified', description: app.agentDecision?.reason || 'Agent could not verify your details.', at: app.agentDecision?.at })
-  else steps.push(done('Agent verification', 'Agent verified your information and recommended approval.', app.agentDecision?.at))
-
-  if (s === STATUS.AGENT_APPROVED) steps.push({ title: 'Manager approval', state: 'current', label: 'In progress', description: "Manager reviews the agent's recommendation." })
-  else if (s === STATUS.APPROVED || s === STATUS.DISBURSED) steps.push(done('Manager approval', 'Manager approved the recommendation.', app.managerDecision?.at))
-  else if (s === STATUS.REJECTED)
-    steps.push({ title: 'Manager approval', state: 'failed', label: 'Declined', description: app.managerDecision?.reason, at: app.managerDecision?.at })
-  else if (s === STATUS.AGENT_REJECTED) steps.push({ title: 'Manager approval', state: 'skipped', label: 'Skipped', description: 'Not required — application closed at verification.' })
-  else steps.push({ title: 'Manager approval', state: 'pending', label: 'Pending', description: "Manager reviews the agent's recommendation." })
-
-  if (s === STATUS.APPROVED || s === STATUS.DISBURSED) steps.push({ ...done('Final decision', 'Congratulations! Your loan has been approved.', app.managerDecision?.at), label: 'Approved' })
-  else if (s === STATUS.REJECTED || s === STATUS.AGENT_REJECTED)
-    steps.push({ title: 'Final decision', state: 'failed', label: 'Rejected', description: 'Your loan application was not approved.', at: (app.managerDecision || app.agentDecision)?.at })
-  else steps.push({ title: 'Final decision', state: 'pending', label: 'Pending', description: 'Loan approved or rejected.' })
-
-  const to = bankLabel(app.bank)
-  if (s === STATUS.DISBURSED)
-    steps.push({ ...done('Amount disbursed', `${formatINR(app.disbursement.amount)} sent to ${to} via ${app.disbursement.mode} · UTR ${app.disbursement.utr}`, app.disbursement.at), label: 'Credited' })
-  else if (s === STATUS.APPROVED) steps.push({ title: 'Amount disbursed', state: 'current', label: 'Processing', description: `Transfer to ${to} is being processed.` })
-  else if (s === STATUS.REJECTED || s === STATUS.AGENT_REJECTED) steps.push({ title: 'Amount disbursed', state: 'skipped', label: 'Not applicable', description: 'No amount is disbursed for rejected applications.' })
-  else steps.push({ title: 'Amount disbursed', state: 'pending', label: 'Pending', description: `After approval, the amount is sent to ${to}.` })
+  if (s === STATUS.DISBURSED) steps.push(done('Money sent', `${formatINR(t.disbursement.amount)} sent to ${t.bankLabel} via ${t.disbursement.mode}. Reference (UTR): ${t.disbursement.utr}`, t.disbursement.at, 'Sent'))
+  else if (s === STATUS.APPROVED) steps.push({ title: 'Money sent', state: 'current', label: 'Processing', description: `The amount will be sent to ${t.bankLabel}.` })
+  else steps.push({ title: 'Money sent', state: rejected ? 'skipped' : 'pending', label: rejected ? 'Not applicable' : 'Pending', description: `After approval, the amount is sent to ${t.bankLabel}.` })
 
   return steps
 }
@@ -92,22 +76,5 @@ export function StatusTimeline({ steps }) {
         </li>
       ))}
     </ol>
-  )
-}
-
-/** Compact horizontal progress used in list rows. */
-export function MiniProgress({ steps }) {
-  return (
-    <div className="flex items-center gap-1" aria-hidden="true">
-      {steps.map((s) => (
-        <span
-          key={s.title}
-          className={cn(
-            'h-1.5 flex-1 rounded-full',
-            s.state === 'complete' ? 'bg-success' : s.state === 'current' ? 'bg-primary/70' : s.state === 'failed' ? 'bg-destructive' : 'bg-border'
-          )}
-        />
-      ))}
-    </div>
   )
 }

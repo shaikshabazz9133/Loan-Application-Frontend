@@ -1,8 +1,9 @@
-import { Briefcase, CheckCircle2, MapPin, ShieldCheck, User } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Briefcase, CheckCircle2, Search, ShieldCheck, User } from 'lucide-react'
 import { Logo } from '@/components/shared/Logo'
 
 const roles = [
-  { icon: User, title: 'Customer', text: 'Apply & track', tone: 'from-sky-400/30 text-sky-300' },
+  { icon: User, title: 'Customer', text: 'Apply & track, no account', tone: 'from-sky-400/30 text-sky-300' },
   { icon: Briefcase, title: 'Agent', text: 'Review & decide', tone: 'from-indigo-400/30 text-indigo-300' },
   { icon: ShieldCheck, title: 'Manager', text: 'Manage & approve', tone: 'from-teal-400/30 text-teal-300' },
 ]
@@ -16,7 +17,7 @@ export default function AuthLayout({ children }) {
         <div className="absolute -bottom-40 -left-20 size-[26rem] rounded-full bg-indigo-500/20 blur-3xl" />
 
         <div className="relative">
-          <Logo light />
+          <Link to="/" aria-label="LendWise home"><Logo light /></Link>
         </div>
 
         <div className="relative my-auto max-w-lg py-10">
@@ -28,7 +29,7 @@ export default function AuthLayout({ children }) {
             <br />
             <span className="bg-gradient-to-r from-teal-300 to-emerald-200 bg-clip-text text-transparent">decisions made faster.</span>
           </h1>
-          <p className="mt-4 text-base text-slate-300">One application, three role-based portals. Apply in minutes and get matched with a verified agent near you.</p>
+          <p className="mt-4 text-base text-slate-300">Customers apply in minutes without an account. Agents review, managers approve and disburse.</p>
 
           <div className="mt-8 grid grid-cols-3 gap-3">
             {roles.map((r) => (
@@ -42,9 +43,9 @@ export default function AuthLayout({ children }) {
 
           <ul className="mt-8 space-y-2.5 text-sm text-slate-300">
             {[
-              [MapPin, 'Auto-assigned to the nearest agent within 2 km'],
-              [CheckCircle2, 'Two-step approval: agent verification + manager approval'],
-              [ShieldCheck, 'Track every step of your application in real time'],
+              [Briefcase, 'Any agent can pick up a new application; the first one takes it'],
+              [CheckCircle2, 'Two-step approval: agent review + manager approval'],
+              [Search, 'Customers track every step with their application ID'],
             ].map(([Icon, t]) => (
               <li key={t} className="flex items-center gap-2.5">
                 <Icon className="size-4 text-teal-400" /> {t}

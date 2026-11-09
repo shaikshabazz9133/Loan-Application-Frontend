@@ -15,7 +15,6 @@ import { StatCard } from '@/components/shared/StatCard'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { DataTable } from '@/components/shared/DataTable'
 import { InfoGrid } from '@/components/shared/InfoGrid'
-import { MapView } from '@/components/shared/MapView'
 import { AgentFormDialog } from './AgentFormDialog'
 import { agentStats } from './Agents'
 
@@ -57,7 +56,7 @@ export default function AgentDetail() {
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-3">
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <Avatar name={agent.name} className="size-16 text-lg" />
@@ -76,20 +75,8 @@ export default function AgentDetail() {
                 ['Email', agent.email, Mail],
                 ['Mobile', agent.mobile, Phone],
                 ['Operating area', agent.area, MapPin],
-                ['Coordinates', `${agent.location.lat.toFixed(4)}, ${agent.location.lng.toFixed(4)}`, MapPin],
                 ['Joined', formatDate(agent.createdAt), Calendar],
               ]}
-            />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>Coverage</CardTitle><CardDescription>2 km radius & assigned customers</CardDescription></CardHeader>
-          <CardContent>
-            <MapView
-              className="h-56"
-              center={agent.location}
-              radiusKm={2}
-              markers={[{ id: 'a', position: agent.location, label: agent.name, kind: 'agent' }, ...apps.map((a) => ({ id: a.id, position: a.location, label: a.fullName, kind: 'primary' }))]}
             />
           </CardContent>
         </Card>

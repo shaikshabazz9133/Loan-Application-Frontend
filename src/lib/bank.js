@@ -18,9 +18,4 @@ export const maskAccount = (acc = '') => (acc.length > 4 ? `•••• ${acc.s
 /** "HDFC Bank •••• 1234" */
 export const bankLabel = (bank) => (bank ? `${bank.bankName} ${maskAccount(bank.account)}` : '—')
 
-/** Simulated bank transfer reference (UTR). */
-export const makeUtr = (ifsc = 'XXXX', seed = Date.now()) =>
-  `${ifsc.slice(0, 4)}N${String(seed).slice(-6)}${String(Math.floor(Math.random() * 1e6)).padStart(6, '0')}`
 
-const norm = (s = '') => s.toLowerCase().replace(/[^a-z]/g, '')
-export const holderMatches = (holder, fullName) => !!holder && norm(holder) === norm(fullName)

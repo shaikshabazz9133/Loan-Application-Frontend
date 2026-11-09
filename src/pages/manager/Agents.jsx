@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { useStore } from '@/lib/store'
 import { STATUS, isApproved } from '@/lib/constants'
 import { cn } from '@/lib/utils'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +16,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { EmptyState, PageHeader } from '@/components/shared/PageHeader'
 import { SearchInput } from '@/components/shared/SearchInput'
 import { DataTable } from '@/components/shared/DataTable'
-import { MapView } from '@/components/shared/MapView'
 import { AgentFormDialog } from './AgentFormDialog'
 
 export function agentStats(agentId, applications) {
@@ -25,7 +24,7 @@ export function agentStats(agentId, applications) {
   const rej = mine.filter((a) => a.status === STATUS.AGENT_REJECTED).length
   return {
     total: mine.length,
-    open: mine.filter((a) => [STATUS.ASSIGNED, STATUS.IN_VERIFICATION].includes(a.status)).length,
+    open: mine.filter((a) => a.status === STATUS.ASSIGNED).length,
     recommended: rec,
     rejected: rej,
     approved: mine.filter((a) => isApproved(a.status)).length,
@@ -49,10 +48,6 @@ export default function Agents() {
       return !s || [a.name, a.email, a.mobile, a.area, a.employeeCode].some((v) => v?.toLowerCase().includes(s))
     })
 
-  const center = agents.length
-    ? { lat: agents.reduce((s, a) => s + a.location.lat, 0) / agents.length, lng: agents.reduce((s, a) => s + a.location.lng, 0) / agents.length }
-    : { lat: 17.385, lng: 78.4867 }
-
   const toggle = async (a, v) => {
     let released
     try {
@@ -60,7 +55,7 @@ export default function Agents() {
     } catch (e) {
       return toast.error(`Could not ${v ? 'activate' : 'deactivate'} ${a.name}`, { description: e.message })
     }
-    toast.success(`${a.name} ${v ? 'activated' : 'deactivated'}`, released ? { description: `${released} unfinished application${released > 1 ? 's' : ''} returned to open requests for other area agents.` } : undefined)
+    toast.success(`${a.name} ${v ? 'activated' : 'deactivated'}`, released ? { description: `${released} unfinished application${released > 1 ? 's' : ''} returned to the open list for other agents.` } : undefined)
   }
 
   const Actions = ({ a }) => (
@@ -84,22 +79,6 @@ export default function Agents() {
         description={`${agents.length} agents · ${agents.filter((a) => a.active).length} active`}
         actions={<Button onClick={() => setForm({ open: true, agent: null })}><Plus /> Add agent</Button>}
       />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Coverage map</CardTitle>
-          <CardDescription>Each agent sees loan requests from customers within 2 km of their location.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <MapView
-            className="h-72"
-            center={center}
-            zoom={11}
-            spanKm={22}
-            markers={agents.map((a) => ({ id: a.id, position: a.location, label: `${a.name} · ${a.area}${a.active ? '' : ' (inactive)'}`, kind: a.active ? 'agent' : 'muted' }))}
-          />
-        </CardContent>
-      </Card>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput value={q} onChange={setQ} placeholder="Search name, area, code…" />

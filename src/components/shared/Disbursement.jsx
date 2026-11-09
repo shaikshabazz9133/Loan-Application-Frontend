@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { BadgeCheck, Check, Copy, Landmark, PartyPopper, XCircle } from 'lucide-react'
+import { Check, Copy, Landmark } from 'lucide-react'
 import { toast } from 'sonner'
 import { STATUS } from '@/lib/constants'
 import { bankLabel, maskAccount } from '@/lib/bank'
-import { cn, formatDate, formatDateTime, formatINR } from '@/lib/utils'
+import { cn, formatDateTime, formatINR } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
@@ -27,7 +27,7 @@ function CopyUtr({ utr }) {
   )
 }
 
-/** Bank account on file + disbursement status/receipt. Used by customer and manager. */
+/** Bank account on file + disbursement receipt (manager). */
 export function DisbursementCard({ app, showFullAccount = false, action }) {
   const b = app.bank
   const d = app.disbursement
@@ -72,49 +72,3 @@ export function DisbursementCard({ app, showFullAccount = false, action }) {
     </Card>
   )
 }
-
-/** Big outcome banner for the customer once a decision is made. */
-export function LoanOutcomeBanner({ app }) {
-  const s = app.status
-  if (s === STATUS.DISBURSED)
-    return (
-      <Banner tone="success" icon={PartyPopper} title="Loan approved & amount sent!">
-        <b className="tabular">{formatINR(app.disbursement.amount)}</b> has been sent to your <b>{bankLabel(app.bank)}</b> account on {formatDate(app.disbursement.at)} via {app.disbursement.mode}.
-        <span className="mt-1 block text-xs opacity-80">UTR {app.disbursement.utr} · it may take up to 2 hours to reflect in your account.</span>
-      </Banner>
-    )
-  if (s === STATUS.APPROVED)
-    return (
-      <Banner tone="success" icon={BadgeCheck} title="Congratulations, your loan is approved!">
-        <b className="tabular">{formatINR(app.amount)}</b> will be sent to your <b>{bankLabel(app.bank)}</b> account shortly. You'll see the transfer reference here once it's sent.
-      </Banner>
-    )
-  if (s === STATUS.REJECTED || s === STATUS.AGENT_REJECTED)
-    return (
-      <Banner tone="danger" icon={XCircle} title="Your loan application was not approved">
-        Reason: {(app.managerDecision || app.agentDecision)?.reason || 'Not specified'}. You can apply again after addressing the reason above.
-      </Banner>
-    )
-  return null
-}
-
-function Banner({ tone, icon: Icon, title, children }) {
-  return (
-    <div
-      className={cn(
-        'mb-6 flex items-start gap-4 rounded-2xl border p-5 animate-fade-up',
-        tone === 'success' ? 'border-emerald-200 bg-gradient-to-r from-emerald-50 to-card text-emerald-900' : 'border-red-200 bg-gradient-to-r from-red-50 to-card text-red-900'
-      )}
-      role="status"
-    >
-      <span className={cn('flex size-11 shrink-0 items-center justify-center rounded-xl text-white', tone === 'success' ? 'bg-success' : 'bg-destructive')}>
-        <Icon className="size-5" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-lg font-extrabold">{title}</p>
-        <p className="mt-0.5 text-sm">{children}</p>
-      </div>
-    </div>
-  )
-}
-

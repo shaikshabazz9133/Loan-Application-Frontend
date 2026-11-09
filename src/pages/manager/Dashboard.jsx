@@ -15,7 +15,7 @@ import { DataTable } from '@/components/shared/DataTable'
 import { AXIS_TICK, ChartTooltip, GRID, Legend, SERIES, STATUS_COLOR } from '@/components/shared/charts'
 
 export default function ManagerDashboard() {
-  const { users, applications, getUser } = useStore()
+  const { users, applications } = useStore()
   const navigate = useNavigate()
   const customers = users.filter((u) => u.role === 'customer')
   const agents = users.filter((u) => u.role === 'agent')
@@ -55,7 +55,7 @@ export default function ManagerDashboard() {
         name: ag.name.split(' ')[0],
         Recommended: mine.filter((a) => a.agentDecision?.decision === 'recommended').length,
         Rejected: mine.filter((a) => a.status === STATUS.AGENT_REJECTED).length,
-        'In progress': mine.filter((a) => a.status === STATUS.ASSIGNED || a.status === STATUS.IN_VERIFICATION).length,
+        'In progress': mine.filter((a) => a.status === STATUS.ASSIGNED).length,
       }
     })
     .sort((a, b) => b.Recommended + b.Rejected + b['In progress'] - (a.Recommended + a.Rejected + a['In progress']))
@@ -196,13 +196,13 @@ export default function ManagerDashboard() {
               rowHref={(a) => `/manager/applications/${a.id}`}
               columns={[
                 { key: 'c', header: 'Customer', cell: (a) => <div className="flex items-center gap-2.5"><Avatar name={a.fullName} className="size-8 text-[10px]" /><div><p className="font-semibold">{a.fullName}</p><p className="text-xs text-muted-foreground">{formatDate(a.createdAt)}</p></div></div> },
-                { key: 'ag', header: 'Agent', cell: (a) => getUser(a.agentId)?.name || <span className="text-amber-600">Not accepted yet</span> },
+                { key: 'ag', header: 'Agent', cell: (a) => a.agentName || <span className="text-amber-600">Not accepted yet</span> },
                 { key: 'amt', header: 'Amount', cell: (a) => <b className="tabular">{formatINR(a.amount)}</b> },
                 { key: 's', header: 'Status', cell: (a) => <StatusBadge status={a.status} /> },
               ]}
               mobileCard={(a) => (
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0"><p className="truncate font-semibold">{a.fullName}</p><p className="text-xs text-muted-foreground">{formatINR(a.amount)} · {getUser(a.agentId)?.name || 'Not accepted yet'}</p></div>
+                  <div className="min-w-0"><p className="truncate font-semibold">{a.fullName}</p><p className="text-xs text-muted-foreground">{formatINR(a.amount)} · {a.agentName || 'Not accepted yet'}</p></div>
                   <StatusBadge status={a.status} />
                 </div>
               )}

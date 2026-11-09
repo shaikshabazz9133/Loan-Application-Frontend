@@ -24,7 +24,6 @@ export function fieldErrors(err) {
   if (err?.code === 'EMAIL_TAKEN') errors.email = err.message
   if (err?.code === 'MOBILE_TAKEN') errors.mobile = err.message
   if (errors.lat || errors.lng) errors.location = errors.lat || errors.lng
-  if (errors.termsAccepted) errors.terms = errors.termsAccepted
   return errors
 }
 
@@ -104,36 +103,42 @@ async function send(path, { method = 'GET', body, auth = true, retry = true, as 
 }
 
 // ---------- endpoints ----------
+/** Staff (agents and managers) only. Customers apply and track without an account. */
 export const authApi = {
-  register: (data) => send('/auth/register', { method: 'POST', body: data, auth: false }),
   login: (data) => send('/auth/login', { method: 'POST', body: data, auth: false }),
   me: () => send('/auth/me'),
 }
 
 export const agentsApi = {
   list: () => send('/agents'),
-  /** Active agents within the assignment radius of a point (no contact details). */
-  nearby: ({ lat, lng }) => send(`/agents/nearby?lat=${lat}&lng=${lng}`),
   create: (data) => send('/agents', { method: 'POST', body: data }),
   update: (id, data) => send(`/agents/${id}`, { method: 'PATCH', body: data }),
   remove: (id) => send(`/agents/${id}`, { method: 'DELETE' }),
 }
 
 export const applicationsApi = {
-  /** Apply-form options: purposes, employment types, tenures, limits, interest rate, document rules. */
-  options: () => send('/applications/options'),
-  /** Role-scoped: customer -> own, agent -> open requests in their area, manager -> all. */
+  // ----- public: applicants have no account -----
+  /** Apply-form options: purposes, employment types, tenures, limits, document rules. */
+  options: () => send('/applications/options', { auth: false }),
+  /** formData: "data" (application JSON) + one file per document type. Returns { application }. */
+  submit: (formData) => send('/applications', { method: 'POST', body: formData, auth: false }),
+  /** Status for an application id + the applicant's mobile number. */
+  track: (applicationId, mobile) => send('/applications/track', { method: 'POST', body: { applicationId, mobile }, auth: false }),
+
+  // ----- staff -----
+  /** Agent: open applications + the ones they accepted. Manager: all. */
   list: () => send('/applications'),
-  /** formData: "data" (application JSON) + one file per document type. Returns { application, areaAgents }. */
-  submit: (formData) => send('/applications', { method: 'POST', body: formData }),
+  /** action: 'accept' | 'approve' | 'reject' | 'disburse'; extra: { note, reason, mode }. Returns the updated application. */
+  act: (appId, action, extra = {}) => send(`/applications/${encodeURIComponent(appId)}/actions`, { method: 'POST', body: { action, ...extra } }),
   document: (appId, docType) => send(`/applications/${encodeURIComponent(appId)}/documents/${docType}`, { as: 'blob' }),
 }
 
 export const eligibilityApi = {
-  /** { pan } -> simulated credit score; add { amount, income, tenure } for rate, EMI and totals. Server-priced. */
-  quote: (data) => send('/eligibility/quote', { method: 'POST', body: data }),
+  /** { pan } -> simulated credit score; add { amount, income, tenure } for rate, EMI and totals. Public. */
+  quote: (data) => send('/eligibility/quote', { method: 'POST', body: data, auth: false }),
 }
 
 export const customersApi = {
+  /** Everyone who has applied (one customer per mobile number). Manager only. */
   list: () => send('/customers'),
 }

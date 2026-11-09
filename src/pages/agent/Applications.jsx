@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ExternalLink, FileText, Inbox } from 'lucide-react'
-import { useStore, openRequestsFor } from '@/lib/store'
+import { FileText, Inbox } from 'lucide-react'
+import { useStore } from '@/lib/store'
 import { STATUS } from '@/lib/constants'
 import { cn, formatDate, formatINR } from '@/lib/utils'
 import { emiOf } from '@/lib/kyc'
@@ -13,27 +13,26 @@ import { EmptyState, PageHeader } from '@/components/shared/PageHeader'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { SearchInput } from '@/components/shared/SearchInput'
 import { DataTable } from '@/components/shared/DataTable'
-import { googleMapsLink } from '@/components/shared/MapView'
-import { OpenRequestCard, useOpenRequestActions } from '@/components/shared/OpenRequest'
+import { OpenRequestCard, useAcceptApplication } from '@/components/shared/OpenRequest'
 
 const FILTERS = {
   all: { label: 'All', fn: () => true },
-  pending: { label: 'To verify', fn: (a) => a.status === STATUS.ASSIGNED || a.status === STATUS.IN_VERIFICATION },
+  pending: { label: 'To review', fn: (a) => a.status === STATUS.ASSIGNED },
   recommended: { label: 'Approved by me', fn: (a) => a.agentDecision?.decision === 'recommended' },
-  awaiting: { label: 'Awaiting manager', fn: (a) => a.status === STATUS.AGENT_APPROVED },
+  awaiting: { label: 'Waiting for manager', fn: (a) => a.status === STATUS.AGENT_APPROVED },
   rejected: { label: 'Rejected', fn: (a) => a.status === STATUS.AGENT_REJECTED },
 }
 
 export default function AgentApplications() {
   const { currentUser: me, applications } = useStore()
   const [params, setParams] = useSearchParams()
-  const open = useMemo(() => openRequestsFor(me, applications).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [me, applications])
+  const open = useMemo(() => applications.filter((a) => a.status === STATUS.UNASSIGNED), [applications])
+  const mine = useMemo(() => applications.filter((a) => a.agentId === me.id), [applications, me.id])
   const view = params.get('view') || (open.length ? 'open' : 'mine')
   const tab = FILTERS[params.get('status')] ? params.get('status') : 'all'
   const [q, setQ] = useState('')
-  const { accept, decline, dialog } = useOpenRequestActions()
+  const { accept, busy } = useAcceptApplication()
 
-  const mine = useMemo(() => applications.filter((a) => a.agentId === me.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [applications, me.id])
   const rows = mine.filter(FILTERS[tab].fn).filter((a) => {
     const s = q.toLowerCase()
     return !s || [a.fullName, a.mobile, a.email, a.id, a.purpose].some((v) => v.toLowerCase().includes(s))
@@ -50,26 +49,20 @@ export default function AgentApplications() {
     { key: 'amount', header: 'Loan amount', cell: (a) => <span className="font-bold tabular">{formatINR(a.amount)}</span> },
     { key: 'tenure', header: 'Tenure', cell: (a) => <div><p className="font-semibold">{a.tenure} mo</p><p className="text-xs text-muted-foreground">EMI {formatINR(emiOf(a))}</p></div> },
     { key: 'purpose', header: 'Purpose', cell: (a) => a.purpose },
-    { key: 'income', header: 'Monthly income', cell: (a) => <span className="tabular">{formatINR(a.income)}</span> },
-    { key: 'address', header: 'Address', className: 'max-w-[200px] truncate', cell: (a) => <span title={`${a.address}, ${a.city}`}>{a.address}, {a.city}</span> },
-    { key: 'loc', header: 'Location', cell: (a) => (
-      <a href={googleMapsLink(a.location)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-        {a.agentDistanceKm ?? '—'} km <ExternalLink className="size-3" />
-      </a>
-    ) },
+    { key: 'score', header: 'Credit', cell: (a) => <span className="tabular">{a.creditScore ?? '—'}</span> },
     { key: 'date', header: 'Applied', cell: (a) => formatDate(a.createdAt) },
     { key: 'status', header: 'Status', cell: (a) => <StatusBadge status={a.status} /> },
-    { key: 'action', header: '', cell: (a) => { const todo = FILTERS.pending.fn(a); return <Button size="sm" variant={todo ? 'default' : 'outline'} asChild><Link to={`/agent/applications/${a.id}`}>{todo ? 'Verify' : 'View'}</Link></Button> } },
+    { key: 'action', header: '', cell: (a) => { const todo = FILTERS.pending.fn(a); return <Button size="sm" variant={todo ? 'default' : 'outline'} asChild><Link to={`/agent/applications/${a.id}`}>{todo ? 'Review' : 'View'}</Link></Button> } },
   ]
 
   return (
     <div>
-      <PageHeader title="Customer applications" description={`Requests from customers within 2 km of ${me.area}. Accept one to unlock the customer's details.`} />
+      <PageHeader title="Applications" description="Any agent can accept an open application. Once you accept it, only you can review it." />
 
       <div className="mb-5 inline-flex rounded-xl bg-secondary p-1" role="tablist">
         {[
-          ['open', 'Open requests in my area', open.length],
-          ['mine', 'My accepted customers', mine.length],
+          ['open', 'Open applications', open.length],
+          ['mine', 'Accepted by me', mine.length],
         ].map(([k, label, n]) => (
           <button
             key={k}
@@ -86,10 +79,10 @@ export default function AgentApplications() {
 
       {view === 'open' ? (
         open.length === 0 ? (
-          <Card><EmptyState icon={Inbox} title="No open requests" description="New loan applications from customers in your area will appear here. The first agent to accept a request gets it." /></Card>
+          <Card><EmptyState icon={Inbox} title="No open applications" description="New loan applications appear here. The first agent to accept one takes it." /></Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {open.map((a, i) => <OpenRequestCard key={a.id} app={a} agent={me} onAccept={accept} onDecline={decline} style={{ animationDelay: `${i * 40}ms` }} />)}
+            {open.map((a, i) => <OpenRequestCard key={a.id} app={a} onAccept={accept} busy={busy} style={{ animationDelay: `${i * 40}ms` }} />)}
           </div>
         )
       ) : (
@@ -108,7 +101,7 @@ export default function AgentApplications() {
             columns={columns}
             rows={rows}
             rowHref={(a) => `/agent/applications/${a.id}`}
-            empty={<EmptyState icon={FileText} title="No applications found" description="Accept open requests in your area to see them here." />}
+            empty={<EmptyState icon={FileText} title="No applications found" description="Accept open applications to see them here." />}
             mobileCard={(a) => (
               <div className="flex items-start gap-3">
                 <Avatar name={a.fullName} />
@@ -119,14 +112,13 @@ export default function AgentApplications() {
                   </div>
                   <p className="text-xs text-muted-foreground">{a.id} · {a.mobile}</p>
                   <p className="mt-1.5 text-sm"><b className="tabular">{formatINR(a.amount)}</b> · {a.tenure} months · {a.purpose}</p>
-                  <p className="text-xs text-muted-foreground">{formatDate(a.createdAt)} · {a.agentDistanceKm ?? '—'} km away</p>
+                  <p className="text-xs text-muted-foreground">{formatDate(a.createdAt)}</p>
                 </div>
               </div>
             )}
           />
         </Card>
       )}
-      {dialog}
     </div>
   )
 }

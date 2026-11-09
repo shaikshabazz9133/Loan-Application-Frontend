@@ -4,13 +4,15 @@ import { Textarea } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/label'
 
-/** Confirmation dialog with a text field. `required` makes the reason mandatory. */
+/** Confirmation dialog with a text field. `required` makes the reason mandatory. onConfirm may be async:
+ * the dialog waits, closes on success and shows the error (staying open) on failure. */
 export function ReasonDialog({ open, onOpenChange, title, description, label, placeholder, confirmLabel, variant = 'default', required, presets = [], initialText = '', onConfirm }) {
   const [text, setText] = useState('')
   useEffect(() => {
     if (open) setText(initialText)
   }, [open, initialText])
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
   const close = (o) => {
     onOpenChange(o)
     if (!o) setTimeout(() => (setText(''), setError('')), 200)
@@ -24,14 +26,17 @@ export function ReasonDialog({ open, onOpenChange, title, description, label, pl
         </DialogHeader>
         <form
           className="space-y-4"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault()
             if (required && text.trim().length < 5) return setError('Please enter a reason (at least 5 characters).')
+            setBusy(true)
             try {
-              onConfirm(text.trim())
+              await onConfirm(text.trim())
               close(false)
             } catch (err) {
               setError(err.message)
+            } finally {
+              setBusy(false)
             }
           }}
         >
@@ -49,7 +54,7 @@ export function ReasonDialog({ open, onOpenChange, title, description, label, pl
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => close(false)}>Cancel</Button>
-            <Button type="submit" variant={variant}>{confirmLabel}</Button>
+            <Button type="submit" variant={variant} disabled={busy}>{busy ? 'Please wait…' : confirmLabel}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

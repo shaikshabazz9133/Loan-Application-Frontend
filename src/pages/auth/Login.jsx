@@ -39,8 +39,8 @@ export default function Login() {
 
   return (
     <AuthLayout>
-      <h2 className="text-3xl font-extrabold">Welcome back</h2>
-      <p className="mt-1.5 text-sm text-muted-foreground">Sign in to continue to your portal.</p>
+      <h2 className="text-3xl font-extrabold">Staff sign in</h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">For LendWise agents and branch managers.</p>
 
       <form onSubmit={submit} className="mt-8 space-y-5" noValidate>
         <Field label="Email or mobile number" htmlFor="identifier">
@@ -96,9 +96,9 @@ export default function Login() {
       </form>
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
-        New to LendWise?{' '}
-        <Link to="/signup" className="font-bold text-primary hover:underline">
-          Create an account
+        Looking for a loan?{' '}
+        <Link to="/" className="font-bold text-primary hover:underline">
+          Apply without an account
         </Link>
       </p>
 
